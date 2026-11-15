@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DrxError } from '../errors.js'
+import { fetchJson } from '../fetch-json.js'
 import { bundledRegistryDir } from '../package-root.js'
 import { isRecord, isStringArray } from '../validate.js'
 import { validateEntry, type StarterEntry } from './entry.js'
@@ -12,8 +13,6 @@ import { validateEntry, type StarterEntry } from './entry.js'
  */
 export const DEFAULT_REGISTRY =
   'https://raw.githubusercontent.com/druxt/cli/main/starters'
-
-const TIMEOUT_MS = 10_000
 
 export interface Registry {
   /** `remote` for a URL, `bundled` for the copy inside the package. */
@@ -54,34 +53,7 @@ function remoteReader(
   fetcher: typeof fetch,
   auth?: string
 ): ReadJson {
-  return async (file) => {
-    const url = `${base}/${file}`
-    let response: Response
-    try {
-      response = await fetcher(url, {
-        headers: auth ? { authorization: `Bearer ${auth}` } : {},
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      })
-    } catch (error) {
-      const cause = error instanceof Error ? (error.cause ?? error) : error
-      const detail = cause instanceof Error ? cause.message : String(cause)
-      throw new DrxError('registry', `Could not read ${url}: ${detail}.`)
-    }
-    if (!response.ok) {
-      throw new DrxError(
-        'registry',
-        `Could not read ${url}: ${response.status} ${response.statusText}.`
-      )
-    }
-    try {
-      return JSON.parse(await response.text()) as unknown
-    } catch {
-      throw new DrxError(
-        'registry',
-        `Could not read ${url}: it is not valid JSON.`
-      )
-    }
-  }
+  return (file) => fetchJson(`${base}/${file}`, fetcher, auth)
 }
 
 function bundledReader(dir: string): ReadJson {
