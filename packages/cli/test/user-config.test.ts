@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import {
   loadUserConfig,
+  resolveModuleRegistryUrl,
   resolveRegistryUrl,
   userConfigPath,
 } from '../src/user-config.js'
@@ -51,6 +52,7 @@ describe('loadUserConfig', () => {
     expect(await loadUserConfig({ XDG_CONFIG_HOME: home })).toEqual({
       path: join(home, 'drx', 'config.json'),
       registries: {},
+      moduleRegistries: {},
       sources: {},
     })
   })
@@ -59,6 +61,7 @@ describe('loadUserConfig', () => {
     const path = join(home, 'config.json')
     write(path, {
       registries: { team: 'https://example.com/starters' },
+      moduleRegistries: { team: 'https://example.com/modules.json' },
       sources: {
         next: { type: 'npm', tag: 'next' },
         branch: { type: 'git', url: 'https://example.com/druxt.git', ref: 'x' },
@@ -67,6 +70,7 @@ describe('loadUserConfig', () => {
     expect(await loadUserConfig({ DRX_CONFIG: path })).toEqual({
       path,
       registries: { team: 'https://example.com/starters' },
+      moduleRegistries: { team: 'https://example.com/modules.json' },
       sources: {
         next: { type: 'npm', tag: 'next' },
         branch: { type: 'git', url: 'https://example.com/druxt.git', ref: 'x' },
@@ -88,6 +92,11 @@ describe('loadUserConfig', () => {
     [
       '{"registries":{"a":"not a url"}}',
       'registries.a must be an http or https URL',
+    ],
+    ['{"moduleRegistries":7}', 'moduleRegistries must be an object of URLs'],
+    [
+      '{"moduleRegistries":{"a":"ftp://x"}}',
+      'moduleRegistries.a must be an http or https URL',
     ],
     ['{"sources":[]}', 'sources must be an object'],
     ['{"sources":{"a":"npm"}}', 'sources.a must be an object'],
@@ -120,6 +129,7 @@ describe('resolveRegistryUrl', () => {
   const config = {
     path: '/home/me/.config/drx/config.json',
     registries: { team: 'https://example.com/starters' },
+    moduleRegistries: { ours: 'https://example.com/modules.json' },
     sources: {},
   }
 
@@ -138,6 +148,30 @@ describe('resolveRegistryUrl', () => {
   test('fails on a name the configuration does not define', () => {
     expect(() => resolveRegistryUrl('other', config)).toThrow(
       '--registry takes a URL or a name defined in /home/me/.config/drx/config.json. "other" is neither. Defined names: team.'
+    )
+  })
+})
+
+describe('resolveModuleRegistryUrl', () => {
+  const config = {
+    path: '/home/me/.config/drx/config.json',
+    registries: {},
+    moduleRegistries: { ours: 'https://example.com/modules.json' },
+    sources: {},
+  }
+
+  test('takes a URL, or a name from the user configuration', () => {
+    expect(resolveModuleRegistryUrl('https://example.org/m.json', config)).toBe(
+      'https://example.org/m.json'
+    )
+    expect(resolveModuleRegistryUrl('ours', config)).toBe(
+      'https://example.com/modules.json'
+    )
+  })
+
+  test('fails on a name the configuration does not define', () => {
+    expect(() => resolveModuleRegistryUrl('theirs', config)).toThrow(
+      '--module-registry takes a URL or a name defined in /home/me/.config/drx/config.json. "theirs" is neither. Defined names: ours.'
     )
   })
 })
