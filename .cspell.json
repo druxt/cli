@@ -1,5 +1,6 @@
 {
   "files": ["**/*.{js,mjs,ts,json,jsonc,md,yml,yaml}"],
+  "language": "en,en-GB",
   "dictionaryDefinitions": [
     {
       "name": "project-words",
