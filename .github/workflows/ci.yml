@@ -1,0 +1,150 @@
+---
+name: CI
+
+# The same lint and test set as .gitlab-ci.yml. Nothing on this side lints this
+# file: the GitLab pipeline runs actionlint over it.
+#
+# There is no publish job. A release is cut by hand from the changesets until
+# a workflow with its own token is added on purpose.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      # Actions are pinned to commit SHAs, not tags. A tag is a mutable
+      # reference to code that runs with this repository's credentials.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+          # The attribution and prose checks read the pull request's own
+          # commits, so its base has to be present.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # corepack reads the packageManager field, so the manager the lockfile was
+      # written by is the one that installs it, and this file never names one.
+      - run: corepack enable && corepack prepare --activate
+
+      - run: npm ci
+
+      - run: npm run lint:js
+
+      - run: npm run lint:format
+
+      - run: npm run typecheck
+
+      - run: npm run lint:md
+
+      - run: npm run lint:cspell
+
+      - run: npm run lint:knip
+
+      # This repository is public. A host only the author can reach must never
+      # reach a tracked file.
+      - run: npm run lint:private
+
+      - name: Lint commit messages
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: npm run lint:commit -- --from "$BASE_SHA" --to HEAD --verbose
+
+      # The work is the author's. No commit, pull request description or
+      # tracked file may credit an AI tool as author, co-author or generator.
+      - name: Check for AI attribution
+        env:
+          ATTRIBUTION_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          MERGE_REQUEST_DESCRIPTION: ${{ github.event.pull_request.body }}
+        run: bash .gitlab/scripts/check-attribution.sh
+
+      # Project voice over the markdown a change touches, its commit messages
+      # and the pull request description.
+      - name: Lint prose
+        env:
+          PROSE_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          MERGE_REQUEST_DESCRIPTION: ${{ github.event.pull_request.body }}
+          PROSE_LINT_GLOB: "!.changeset/README.md"
+        run: |
+          bash .gitlab/scripts/install-vale.sh .vale/bin .vale/styles
+          bash .gitlab/scripts/lint-prose.sh
+
+      - run: npm run lint:audit
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: corepack enable && corepack prepare --activate
+
+      - run: npm ci
+
+      # The coverage floor in vitest.config.ts is what fails here.
+      - run: npm test -- --reporter=default --reporter=junit --outputFile.junit=reports/junit/junit.xml
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        if: always()
+        with:
+          name: test-results
+          path: reports/junit/
+
+  # A published install reads each package's files allowlist and links its
+  # binaries, which the unit tests do not.
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: corepack enable && corepack prepare --activate
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Pack, install and run the packages
+        run: |
+          mkdir -p "$RUNNER_TEMP/pack-check"
+          npm pack --workspaces --pack-destination "$RUNNER_TEMP/pack-check"
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          cd "$RUNNER_TEMP/pack-check"
+          npm init -y > /dev/null
+          npm install ./druxt-cli-*.tgz ./create-druxt-*.tgz --no-audit --no-fund
+          test "$(npx --no drx --version)" = "$version"
+          test -f node_modules/@druxt/cli/starters/index.json
+          npx --no drx info
+          npx --no create-druxt --help
+
+      # The one step that needs the network: a site from the real quickstart
+      # tarball the registry entry points at.
+      - run: npm run test:e2e
