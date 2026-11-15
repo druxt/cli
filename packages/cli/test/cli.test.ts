@@ -15,6 +15,7 @@ describe('drx', () => {
     const result = await run(['--help'])
     expect(result.code).toBe(0)
     expect(result.stdout).toContain('USAGE drx')
+    expect(result.stdout).toMatch(/init\s+Create a Druxt site from a starter/)
     expect(result.stdout).toMatch(/info\s+Print the versions/)
     expect(result.stderr).toBe('')
   })

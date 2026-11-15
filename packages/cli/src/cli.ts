@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from 'node:util'
 import { defineCommand, renderUsage, runCommand, type CommandDef } from 'citty'
 import { infoCommand } from './commands/info.js'
+import { initCommand } from './commands/init.js'
 import { defaultContext, type CliContext, type TextStream } from './context.js'
 import { DrxError } from './errors.js'
 import { cliVersion } from './package-root.js'
@@ -13,6 +14,7 @@ function mainCommand(context: CliContext) {
       description: 'The Druxt command-line tool',
     },
     subCommands: {
+      init: initCommand(context),
       info: infoCommand(context),
     },
   })

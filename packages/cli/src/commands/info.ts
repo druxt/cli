@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { defineCommand } from 'citty'
+import { defineCommand, type ArgsDef } from 'citty'
 import { adapterFor, type PackageVersion } from '../adapters/index.js'
 import { assertKnownOptions } from '../args.js'
 import type { CliContext } from '../context.js'
@@ -99,7 +99,7 @@ const args = {
     type: 'boolean',
     description: 'Print the report as JSON on stdout',
   },
-} as const
+} satisfies ArgsDef
 
 export function infoCommand(context: CliContext) {
   return defineCommand({

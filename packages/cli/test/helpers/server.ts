@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net'
 
 export interface TestServer {
   url: string
+  /** The responses by path. Add to it after the server has a URL. */
+  files: Record<string, string | Buffer>
   /** Every request received, in order. */
   requests: { path: string; headers: IncomingHttpHeaders }[]
   close(): Promise<void>
@@ -30,6 +32,7 @@ export async function serve(
   const { port } = server.address() as AddressInfo
   return {
     url: `http://127.0.0.1:${port}`,
+    files,
     requests,
     close: () =>
       new Promise((resolve, reject) => {

@@ -27,3 +27,4 @@ nvmrc
 vitest
 yamllint
 opencode
+unstub
