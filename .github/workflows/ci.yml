@@ -140,10 +140,10 @@ jobs:
           cd "$RUNNER_TEMP/pack-check"
           npm init -y > /dev/null
           npm install ./druxt-cli-*.tgz ./create-druxt-*.tgz --no-audit --no-fund
-          test "$(npx --no drx --version)" = "$version"
+          test "$(./node_modules/.bin/drx --version)" = "$version"
           test -f node_modules/@druxt/cli/starters/index.json
-          npx --no drx info
-          npx --no create-druxt --help
+          ./node_modules/.bin/drx info
+          ./node_modules/.bin/create-druxt --help
 
       # The one step that needs the network: a site from the real quickstart
       # tarball the registry entry points at.

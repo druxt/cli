@@ -220,10 +220,10 @@ test:pack:
     - npm pack --workspaces --pack-destination "$CI_PROJECT_DIR/pack-check"
     - cd "$CI_PROJECT_DIR/pack-check" && npm init -y > /dev/null
     - npm install ./druxt-cli-*.tgz ./create-druxt-*.tgz --no-audit --no-fund
-    - test "$(npx --no drx --version)" = "$(node -p "require('$CI_PROJECT_DIR/packages/cli/package.json').version")"
+    - test "$(./node_modules/.bin/drx --version)" = "$(node -p "require('$CI_PROJECT_DIR/packages/cli/package.json').version")"
     - test -f node_modules/@druxt/cli/starters/index.json
-    - npx --no drx info
-    - npx --no create-druxt --help
+    - ./node_modules/.bin/drx info
+    - ./node_modules/.bin/create-druxt --help
     - section_end "pack"
 
 # The one job that needs the network: it creates a site from the real
