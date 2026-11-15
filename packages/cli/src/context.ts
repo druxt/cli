@@ -1,4 +1,5 @@
 import { downloadTemplate } from 'giget'
+import { findOnPath } from './commands-on-path.js'
 import { installDependencies } from './install.js'
 import { bundledRegistryDir } from './package-root.js'
 import { terminalPrompter } from './prompts.js'
@@ -53,6 +54,8 @@ export interface CliContext {
   download: typeof downloadTemplate
   /** Installs the dependencies of the site in a directory. */
   install: (dir: string) => Promise<void>
+  /** The file a command name resolves to on PATH, or undefined. */
+  findCommand: (name: string) => string | undefined
 }
 
 export function defaultContext(): CliContext {
@@ -70,5 +73,6 @@ export function defaultContext(): CliContext {
     bundledRegistryDir: bundledRegistryDir(),
     download: downloadTemplate,
     install: (dir) => installDependencies(dir),
+    findCommand: (name) => findOnPath(name),
   }
 }

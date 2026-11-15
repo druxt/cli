@@ -105,6 +105,7 @@ describe('drx init', () => {
       ...CONFIG,
       installed: false,
       requires: { node: '16.18.1', tools: ['DDEV'] },
+      commands: null,
       next: ['cd site', 'npm run setup', 'npm run dev'],
     })
     expect(result.stderr).toContain('Reading starters from')
@@ -480,5 +481,108 @@ describe('drx init warnings', () => {
     expect(result.stderr).toContain(
       'Warning: The starter has no nuxt/ directory, which its registry entry names as the frontend part.'
     )
+  })
+})
+
+describe('drx init and the commands a starter needs', () => {
+  const needs = (commands: unknown) => async () => {
+    await registry.close()
+    registry = await fixtureRegistry(STARTER_FILES, (entry) => {
+      const druxt = entry.druxt as { requires: Record<string, unknown> }
+      druxt.requires.commands = commands
+    })
+  }
+  const on = (present: string[]) => (name: string) =>
+    present.includes(name) ? `/usr/bin/${name}` : undefined
+  const quiet = { nodeVersion: '16.18.1' }
+
+  describe('with alternatives', () => {
+    beforeEach(needs([['php', 'composer'], ['ddev']]))
+
+    test('warns once when no alternative is complete, and still creates the site', async () => {
+      const result = await init(['site', '--yes'], {
+        ...quiet,
+        findCommand: on([]),
+      })
+      expect(result.code).toBe(0)
+      expect(existsSync(join(cwd, 'site', 'drx.config.json'))).toBe(true)
+      expect(result.stderr.match(/Warning/g)).toHaveLength(1)
+      expect(result.stderr).toContain(
+        'Warning: The quickstart starter needs php and composer, or ddev. Not found on PATH: php, composer, ddev. Install the commands of one alternative before you set up the site.'
+      )
+    })
+
+    test('names only what is missing', async () => {
+      const result = await init(['site', '--yes'], {
+        ...quiet,
+        findCommand: on(['composer']),
+      })
+      expect(result.stderr).toContain('Not found on PATH: php, ddev.')
+    })
+
+    test.each([[['php', 'composer']], [['ddev']]])(
+      'does not warn when %j are present',
+      async (present) => {
+        const result = await init(['site', '--yes'], {
+          ...quiet,
+          findCommand: on(present),
+        })
+        expect(result.code).toBe(0)
+        expect(result.stderr).not.toContain('Warning')
+      }
+    )
+
+    test('--json reports what was found and what was missing', async () => {
+      const result = await init(['site', '--yes', '--json'], {
+        ...quiet,
+        findCommand: on(['composer']),
+      })
+      expect(result.code).toBe(0)
+      expect(JSON.parse(result.stdout).commands).toEqual({
+        satisfied: false,
+        alternatives: [['php', 'composer'], ['ddev']],
+        found: ['composer'],
+        missing: ['php', 'ddev'],
+      })
+    })
+
+    test('warns before it installs', async () => {
+      const install = vi.fn(async () => {
+        throw new Error('npm install exited with code 1')
+      })
+      const result = await init(['site', '--yes', '--install'], {
+        ...quiet,
+        install,
+        findCommand: on([]),
+      })
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain('Not found on PATH: php, composer, ddev.')
+    })
+  })
+
+  describe('with one set of commands', () => {
+    beforeEach(needs([['php', 'composer']]))
+
+    test('says to install what is missing', async () => {
+      const result = await init(['site', '--yes'], {
+        ...quiet,
+        findCommand: on(['php']),
+      })
+      expect(result.stderr).toContain(
+        'Warning: The quickstart starter needs php and composer. Not found on PATH: composer. Install what is missing before you set up the site.'
+      )
+    })
+  })
+
+  test('an entry that names no commands is not checked', async () => {
+    const findCommand = vi.fn()
+    const result = await init(['site', '--yes', '--json'], {
+      ...quiet,
+      findCommand,
+    })
+    expect(result.code).toBe(0)
+    expect(findCommand).not.toHaveBeenCalled()
+    expect(JSON.parse(result.stdout).commands).toBeNull()
+    expect(result.stderr).not.toContain('Warning')
   })
 })
