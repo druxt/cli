@@ -1,11 +1,12 @@
 import { DrxError } from '../errors.js'
 import { isLayout, LAYOUTS, type Layout } from '../layouts.js'
+import { partsProblem, type Part } from '../parts.js'
 import {
+  isHttpUrl,
   isNonEmptyString,
   isRecord,
-  partsProblem,
-  type Part,
-} from '../parts.js'
+  isStringArray,
+} from '../validate.js'
 
 export interface StarterRequirements {
   /** The Node version the site runs on, such as `16.18.1` or `22`. */
@@ -38,19 +39,6 @@ export interface StarterEntry {
   subdir?: string
   headers?: Record<string, string>
   druxt: StarterDetails
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string')
-}
-
-function isHttpUrl(value: unknown): boolean {
-  if (typeof value !== 'string') return false
-  try {
-    return ['http:', 'https:'].includes(new URL(value).protocol)
-  } catch {
-    return false
-  }
 }
 
 function isIsoDate(value: unknown): boolean {

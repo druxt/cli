@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DrxError } from '../errors.js'
 import { bundledRegistryDir } from '../package-root.js'
-import { isRecord } from '../parts.js'
+import { isRecord, isStringArray } from '../validate.js'
 import { validateEntry, type StarterEntry } from './entry.js'
 
 /**
@@ -91,16 +91,13 @@ function bundledReader(dir: string): ReadJson {
 
 function namesFrom(index: unknown, label: string): string[] {
   const starters = isRecord(index) ? index.starters : undefined
-  if (
-    !Array.isArray(starters) ||
-    !starters.every((name) => typeof name === 'string')
-  ) {
+  if (!isStringArray(starters)) {
     throw new DrxError(
       'registry',
       `${label} is invalid: starters must be an array of names.`
     )
   }
-  return starters as string[]
+  return starters
 }
 
 function remoteRegistry(base: string, read: ReadJson): Registry {

@@ -1,3 +1,5 @@
+import { isNonEmptyString, isRecord } from './validate.js'
+
 export const ROLES = ['frontend', 'backend'] as const
 export type Role = (typeof ROLES)[number]
 
@@ -11,14 +13,6 @@ export interface Part {
   kind: string
   /** Relative to the project root, with forward slashes. */
   path: string
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-export function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim() !== ''
 }
 
 /** True for a path that stays inside the directory it is resolved against. */
