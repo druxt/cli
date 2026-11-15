@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from 'vitest'
-import { adapterFor, knownKinds } from '../../src/adapters/index.js'
+import {
+  adapterFor,
+  kindsWithRole,
+  knownKinds,
+} from '../../src/adapters/index.js'
 import { cleanTmp, tmp, writeTree } from '../helpers/tmp.js'
 
 afterEach(cleanTmp)
@@ -139,5 +143,99 @@ describe('the drupal adapter', () => {
     await expect(drupal.addModule(tmp(), 'druxt')).rejects.toThrow(
       'Adding a module is not available yet.'
     )
+  })
+})
+
+describe('kindsWithRole', () => {
+  test('lists the kinds of one role', () => {
+    expect(kindsWithRole('frontend')).toEqual(['nuxt'])
+    expect(kindsWithRole('backend')).toEqual(['drupal'])
+  })
+})
+
+describe('the Druxt version of a part', () => {
+  const nuxt = adapterFor('nuxt')!
+
+  test('is the range asked for and the version installed', async () => {
+    const dir = tmp()
+    writeTree(dir, {
+      'package.json': { dependencies: { druxt: '^0.25.0' } },
+      'node_modules/druxt/package.json': { version: '0.25.2' },
+    })
+    expect(await nuxt.druxt(dir)).toEqual({
+      name: 'druxt',
+      range: '^0.25.0',
+      installed: '0.25.2',
+    })
+  })
+
+  test('is found when another package brought it in', async () => {
+    const dir = tmp()
+    writeTree(dir, {
+      'package.json': { dependencies: { 'druxt-site': '^0.14.3' } },
+      'node_modules/druxt/package.json': { version: '0.25.2' },
+    })
+    expect(await nuxt.druxt(dir)).toEqual({
+      name: 'druxt',
+      range: null,
+      installed: '0.25.2',
+    })
+  })
+
+  test('is the scoped core package on a site that has that one', async () => {
+    const dir = tmp()
+    writeTree(dir, {
+      'package.json': { dependencies: { '@druxt/core': '^2.0.0' } },
+    })
+    expect(await nuxt.druxt(dir)).toEqual({
+      name: '@druxt/core',
+      range: '^2.0.0',
+      installed: null,
+    })
+  })
+
+  test('is undefined when the part has no Druxt', async () => {
+    const dir = tmp()
+    writeTree(dir, { 'package.json': { dependencies: { nuxt: '2.15.8' } } })
+    expect(await nuxt.druxt(dir)).toBeUndefined()
+  })
+
+  test('is undefined for a kind that holds no Druxt package', async () => {
+    expect(await adapterFor('drupal')!.druxt(tmp())).toBeUndefined()
+  })
+})
+
+describe('one package of a part', () => {
+  const nuxt = adapterFor('nuxt')!
+
+  test('is its range and installed version', async () => {
+    const dir = tmp()
+    writeTree(dir, {
+      'package.json': { dependencies: { 'druxt-blocks': '^0.25.1' } },
+      'node_modules/druxt-blocks/package.json': { version: '0.25.3' },
+      'node_modules/druxt-router/package.json': { version: '0.25.1' },
+    })
+    expect(await nuxt.package(dir, 'druxt-blocks')).toEqual({
+      name: 'druxt-blocks',
+      range: '^0.25.1',
+      installed: '0.25.3',
+    })
+    expect(await nuxt.package(dir, 'druxt-router')).toEqual({
+      name: 'druxt-router',
+      range: null,
+      installed: '0.25.1',
+    })
+  })
+
+  test('is undefined when the part neither asks for it nor has it', async () => {
+    const dir = tmp()
+    writeTree(dir, { 'package.json': {} })
+    expect(await nuxt.package(dir, 'druxt-blocks')).toBeUndefined()
+  })
+
+  test('is undefined for a kind with no such packages', async () => {
+    expect(
+      await adapterFor('drupal')!.package(tmp(), 'druxt-blocks')
+    ).toBeUndefined()
   })
 })
