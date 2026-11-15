@@ -36,5 +36,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "c12": "^3.3.4"
   }
 }
