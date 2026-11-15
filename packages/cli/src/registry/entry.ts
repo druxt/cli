@@ -1,0 +1,124 @@
+import { DrxError } from '../errors.js'
+import { isLayout, LAYOUTS, type Layout } from '../layouts.js'
+import {
+  isNonEmptyString,
+  isRecord,
+  partsProblem,
+  type Part,
+} from '../parts.js'
+
+export interface StarterRequirements {
+  /** The Node version the site runs on, such as `16.18.1` or `22`. */
+  node: string
+  /** Other tools the site needs, each as a phrase to show the user. */
+  tools: string[]
+}
+
+/** What Druxt adds to a giget registry entry. giget ignores the key. */
+export interface StarterDetails {
+  /** The Druxt release line, such as `0.x`. */
+  line: string
+  layout: Layout
+  parts: Part[]
+  requires: StarterRequirements
+  /** The date the starter was last checked to work, as YYYY-MM-DD. */
+  maintained: string
+  /** True for the starter `init` uses when none is named. */
+  default: boolean
+  /** Commands to run in the new site, in order. */
+  steps?: string[]
+}
+
+/** A giget registry entry with the `druxt` object `init` needs. */
+export interface StarterEntry {
+  name: string
+  tar: string
+  defaultDir?: string
+  url?: string
+  subdir?: string
+  headers?: Record<string, string>
+  druxt: StarterDetails
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function isHttpUrl(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol)
+  } catch {
+    return false
+  }
+}
+
+function isIsoDate(value: unknown): boolean {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false
+  }
+  const date = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value)
+}
+
+/** The first problem with an entry, or undefined when it is valid. */
+function entryProblem(entry: unknown): string | undefined {
+  if (!isRecord(entry)) return 'the entry must be an object'
+  if (!isNonEmptyString(entry.name)) return 'name must be a non-empty string'
+  if (!isHttpUrl(entry.tar)) return 'tar must be an http or https URL'
+  for (const key of ['defaultDir', 'url', 'subdir']) {
+    if (entry[key] !== undefined && typeof entry[key] !== 'string') {
+      return `${key} must be a string`
+    }
+  }
+  if (entry.headers !== undefined) {
+    const headers = entry.headers
+    if (!isRecord(headers) || !isStringArray(Object.values(headers))) {
+      return 'headers must be an object of strings'
+    }
+  }
+
+  const druxt = entry.druxt
+  if (!isRecord(druxt)) return 'druxt must be an object'
+  if (!isNonEmptyString(druxt.line)) {
+    return 'druxt.line must be a non-empty string'
+  }
+  if (!isLayout(druxt.layout)) {
+    return `druxt.layout must be one of ${LAYOUTS.join(', ')}`
+  }
+  const parts = partsProblem(druxt.parts, 'druxt.parts')
+  if (parts) return parts
+  const requires = druxt.requires
+  if (!isRecord(requires)) return 'druxt.requires must be an object'
+  if (!isNonEmptyString(requires.node)) {
+    return 'druxt.requires.node must be a non-empty string'
+  }
+  if (!isStringArray(requires.tools)) {
+    return 'druxt.requires.tools must be an array of strings'
+  }
+  if (!isIsoDate(druxt.maintained)) {
+    return 'druxt.maintained must be an ISO date (YYYY-MM-DD)'
+  }
+  if (typeof druxt.default !== 'boolean') {
+    return 'druxt.default must be true or false'
+  }
+  if (druxt.steps !== undefined && !isStringArray(druxt.steps)) {
+    return 'druxt.steps must be an array of strings'
+  }
+  return undefined
+}
+
+/**
+ * Checks a registry entry before anything is downloaded from it. The error
+ * names the first field that is wrong.
+ */
+export function validateEntry(entry: unknown, name: string): StarterEntry {
+  const problem = entryProblem(entry)
+  if (problem) {
+    throw new DrxError(
+      'invalid-entry',
+      `Starter entry "${name}" is invalid: ${problem}.`
+    )
+  }
+  return entry as StarterEntry
+}
