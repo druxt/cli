@@ -1,0 +1,22 @@
+{
+  "name": "Druxt CLI",
+  "image": "mcr.microsoft.com/devcontainers/base:trixie",
+  "features": {
+    // The version in .nvmrc, which the pipelines build on.
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24.18.0"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  // Installs the dependencies and builds both packages, so `drx` runs as soon as the container is up.
+  "postCreateCommand": "npm ci && npm run build && npm link --workspace @druxt/cli --workspace create-druxt",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "vitest.explorer"
+      ]
+    }
+  }
+}

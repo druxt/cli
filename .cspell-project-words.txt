@@ -1,5 +1,5 @@
-# Words this project uses that the standard dictionaries do not carry.
 # Add a term here rather than switching the check off for a file.
+# Words this project uses that the standard dictionaries do not carry.
 actionlint
 automerge
 citty
@@ -8,10 +8,11 @@ commitlint
 consola
 corepack
 cspell
+dbaeumer
 DDEV
 druxt
-Druxt
 druxtjs
+esbenp
 giget
 gitleaks
 interruptible
@@ -22,10 +23,9 @@ lndo
 markdownlint
 mise
 Nuxt
-nuxt
 nvmrc
+opencode
+unjs
+unstub
 vitest
 yamllint
-opencode
-unstub
-unjs
