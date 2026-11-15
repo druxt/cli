@@ -123,7 +123,8 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
     ],
     "requires": {
       "node": "16.18.1",
-      "tools": ["PHP 8.3 or newer with Composer, or DDEV"]
+      "tools": ["PHP 8.3 or newer with Composer, or DDEV"],
+      "commands": [["php", "composer"], ["ddev"]]
     },
     "maintained": "2026-11-15",
     "default": true,
@@ -134,18 +135,29 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 
 `name`, `tar`, `defaultDir`, `url`, `subdir` and `headers` are giget's fields. giget ignores the `druxt` object, so the same file works with `npx giget --registry <url> quickstart`.
 
-| Key in `druxt`   | What it holds                                                              |
-| ---------------- | -------------------------------------------------------------------------- |
-| `line`           | The Druxt release line                                                     |
-| `layout`         | The layout the starter has                                                 |
-| `parts`          | The parts of the starter, as in the project configuration                  |
-| `requires.node`  | The Node version the site runs on: a full version, or a major such as `22` |
-| `requires.tools` | What else the site needs, each as a phrase to show the user                |
-| `maintained`     | The date the starter was last checked to work, as `YYYY-MM-DD`             |
-| `default`        | `true` for the starter `init` uses when none is named                      |
-| `steps`          | Optional. The commands to run in the new site, in order                    |
+| Key in `druxt`      | What it holds                                                              |
+| ------------------- | -------------------------------------------------------------------------- |
+| `line`              | The Druxt release line                                                     |
+| `layout`            | The layout the starter has                                                 |
+| `parts`             | The parts of the starter, as in the project configuration                  |
+| `requires.node`     | The Node version the site runs on: a full version, or a major such as `22` |
+| `requires.tools`    | What else the site needs, each as a phrase to show the user                |
+| `requires.commands` | Optional. The commands the site needs on `PATH`, as a list of alternatives |
+| `maintained`        | The date the starter was last checked to work, as `YYYY-MM-DD`             |
+| `default`           | `true` for the starter `init` uses when none is named                      |
+| `steps`             | Optional. The commands to run in the new site, in order                    |
 
 `index.json` is `{ "starters": ["quickstart"] }`.
+
+`requires.commands` is a list of alternatives, and each alternative is a list of command names. The site can be set up when every command of one alternative is on `PATH`. `[["php", "composer"], ["ddev"]]` reads as `php` and `composer`, or `ddev`. A name is a bare command, and an entry with a path or arguments in one is rejected.
+
+`init` looks each command up on `PATH` without running it. On Windows it tries the extensions in `PATHEXT`. When no alternative is complete it prints one warning naming the missing commands, and still creates the site:
+
+```text
+Warning: The quickstart starter needs php and composer, or ddev. Not found on PATH: php, composer, ddev. Install the commands of one alternative before you set up the site.
+```
+
+With `--json` the result has a `commands` object: `satisfied`, `alternatives`, `found` and `missing`. It is `null` for an entry with no `requires.commands`, which is not checked.
 
 `init` checks an entry before it downloads anything, and fails with a message naming the field that is wrong. It warns when the starter was last maintained more than a year ago, and when the running Node is not the one the starter needs.
 
@@ -176,6 +188,8 @@ The package includes a copy of the public registry. When the public registry can
 - Sources other than `npm`.
 - Adding a module, making a wrapper component and upgrading a site.
 - Kinds other than `nuxt` and `drupal`.
+- A version check of the commands a starter needs. `init` checks that `php` is on `PATH`, not that it is 8.3 or newer.
+- The same check in `drx info`. A project does not record what its starter requires, so `info` would have to read the registry again.
 - A published public registry. Until this repository is public, `init` reads the copy in the package.
 
 ## Development
