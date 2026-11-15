@@ -29,3 +29,5 @@ unjs
 unstub
 vitest
 yamllint
+drush
+PATHEXT
