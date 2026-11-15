@@ -99,7 +99,20 @@ describe('the drupal adapter', () => {
     expect(await drupal.detect(dir)).toBe(false)
   })
 
-  test('reports core and the Druxt module, with what is locked', async () => {
+  test('reports a locked package as not installed until Composer has installed it', async () => {
+    const dir = tmp()
+    writeTree(dir, {
+      'composer.json': { require: { 'drupal/core-recommended': '~11' } },
+      'composer.lock': {
+        packages: [{ name: 'drupal/core-recommended', version: '11.2.4' }],
+      },
+    })
+    expect(await drupal.packages(dir)).toEqual([
+      { name: 'drupal/core-recommended', range: '~11', installed: null },
+    ])
+  })
+
+  test('reports core and the Druxt module, with what Composer installed', async () => {
     const dir = tmp()
     writeTree(dir, {
       'composer.json': {
@@ -109,7 +122,7 @@ describe('the drupal adapter', () => {
           'drupal/simple_oauth': '^6',
         },
       },
-      'composer.lock': {
+      'vendor/composer/installed.json': {
         packages: [
           { name: 'drupal/core-recommended', version: '11.2.4' },
           { name: 'drupal/core', version: '11.2.4' },
