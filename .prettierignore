@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+reports/
+package-lock.json
+CHANGELOG.md
+.vale/
+packages/cli/starters/
+
+# Pipeline definitions are owned by yamllint, not prettier. The two disagree on
+# comment spacing, and letting both format these files means each run of one
+# undoes the other.
+.gitlab-ci.yml
+.github/workflows/
