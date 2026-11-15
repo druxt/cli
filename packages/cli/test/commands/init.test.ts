@@ -146,6 +146,16 @@ describe('drx init', () => {
   })
 })
 
+describe('drx init when the tarball cannot be fetched', () => {
+  test('fails, naming the starter', async () => {
+    delete registry.files['/quickstart.tar.gz']
+    const result = await init(['site', '--yes'])
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('Could not fetch the quickstart starter:')
+    expect(existsSync(join(cwd, 'site', 'drx.config.json'))).toBe(false)
+  })
+})
+
 describe('drx init with no terminal', () => {
   test('fails when no directory is given, saying what to pass', async () => {
     const result = await init([])
@@ -202,6 +212,23 @@ describe('drx init at a terminal', () => {
       'Install its dependencies now?',
     ])
     expect(existsSync(join(cwd, 'asked-site', 'drx.config.json'))).toBe(true)
+  })
+
+  test('asks which starter when the registry has more than one', async () => {
+    registry.files['/index.json'] = JSON.stringify({
+      starters: ['quickstart', 'second'],
+    })
+    registry.files['/second.json'] = JSON.stringify({
+      ...registry.entry,
+      name: 'second',
+    })
+    const { prompter, asked } = scripted(['second', 'monorepo', 'site', false])
+    const result = await init([], { interactive: true, prompter })
+    expect(result.code).toBe(0)
+    expect(asked[0]).toBe('Which starter?')
+    expect(readJson(join(cwd, 'site', 'drx.config.json')).starter).toBe(
+      'second'
+    )
   })
 
   test('asks nothing a flag answered', async () => {
