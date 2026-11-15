@@ -1,0 +1,40 @@
+{
+  "name": "@druxt/cli",
+  "version": "0.0.0",
+  "description": "The Druxt command-line tool: create a site from a starter and report on it.",
+  "keywords": [
+    "druxt",
+    "cli"
+  ],
+  "homepage": "https://druxtjs.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/druxt/cli.git",
+    "directory": "packages/cli"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "drx": "./dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "starters"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/copy-starters.mjs"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

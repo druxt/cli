@@ -1,0 +1,39 @@
+{
+  "name": "create-druxt",
+  "version": "0.0.0",
+  "description": "Create a Druxt site: npm create druxt runs the init command of @druxt/cli.",
+  "keywords": [
+    "druxt",
+    "create"
+  ],
+  "homepage": "https://druxtjs.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/druxt/cli.git",
+    "directory": "packages/create-druxt"
+  },
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "create-druxt": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

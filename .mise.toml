@@ -1,0 +1,55 @@
+# Pinned toolchain. `mise install` gives every contributor and every CI job the
+# same Node. The published packages run on a wider range, stated in their own
+# `engines` fields.
+#
+# The tasks below are the commands CI runs, so a maintainer can run what the
+# pipeline runs.
+
+[tools]
+node = "24.18.0"
+
+[tasks.install]
+description = "Install dependencies with the manager package.json declares"
+run = "corepack enable && corepack prepare --activate && npm ci"
+
+[tasks.build]
+description = "Build both packages"
+run = "npm run build"
+
+[tasks.typecheck]
+description = "Type-check sources, tests and configuration"
+run = "npm run typecheck"
+
+[tasks.lint]
+description = "Run every linter except prose"
+run = "npm run lint"
+
+[tasks."lint:private"]
+description = "Fail if a tracked file points at a host only a private network resolves"
+run = "npm run lint:private"
+
+[tasks."lint:prose"]
+description = "Lint prose with Vale (run lint:prose:install once first)"
+run = "npm run lint:prose"
+
+[tasks."lint:audit"]
+description = "Audit shipped dependencies"
+run = "npm run lint:audit"
+
+[tasks.test]
+description = "Run the unit tests with the coverage floor"
+run = "npm test"
+
+[tasks."test:e2e"]
+description = "Create a site from the real quickstart tarball (needs the network)"
+run = "npm run test:e2e"
+
+[tasks.ci]
+description = "Everything the pipelines run, except the end-to-end test"
+depends = ["lint", "typecheck", "test"]
+
+# Run once per clone. `npm install` does this through scripts/postinstall.mjs.
+# This task is for a clone installed with install scripts skipped.
+[tasks."hooks:install"]
+description = "Point git at the committed .githooks/ directory"
+run = "git config core.hooksPath .githooks"

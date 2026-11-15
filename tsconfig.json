@@ -1,0 +1,13 @@
+{
+  // Type checking for the whole workspace: sources, tests and configuration.
+  // The packages build from their own tsconfig.build.json.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "paths": {
+      "@druxt/cli": ["./packages/cli/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src", "packages/*/test", "test", "*.ts"]
+}

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+reports/
+*.tgz
+*.log
+*.tsbuildinfo
+.env
+
+# Copied from starters/ by the build, so the published package carries the registry.
+packages/cli/starters/
+
+# Vale binary and styles, installed by .gitlab/scripts/install-vale.sh
+.vale/
