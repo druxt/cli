@@ -5,6 +5,7 @@ import { initCommand } from './commands/init.js'
 import { moduleCommand } from './commands/module.js'
 import { defaultContext, type CliContext, type TextStream } from './context.js'
 import { DrxError } from './errors.js'
+import { createOutput } from './output.js'
 import { cliVersion } from './package-root.js'
 
 function mainCommand(context: CliContext) {
@@ -101,7 +102,10 @@ export async function runCli(
         `${JSON.stringify({ ok: false, error: failure }, null, 2)}\n`
       )
     }
-    stderr.write(`Error: ${failure.message}\n`)
+    // In a terminal the line carries the mark for a failure. The word stays.
+    const output = createOutput(context, argv.includes('--json'))
+    const mark = output.decorated ? `${output.err.mark('failed')} ` : ''
+    stderr.write(`${mark}Error: ${failure.message}\n`)
     return 1
   }
 }

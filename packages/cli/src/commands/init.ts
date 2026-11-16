@@ -7,7 +7,7 @@ import {
   describeAlternatives,
   type CommandCheck,
 } from '../commands-on-path.js'
-import type { CliContext } from '../context.js'
+import type { Choice, CliContext, Prompter } from '../context.js'
 import { writeBackendUrl } from '../engines/backend-url.js'
 import {
   assertBaseUrl,
@@ -25,9 +25,10 @@ import {
   LAYOUTS,
   type Layout,
 } from '../layouts.js'
-import { createOutput, type Output } from '../output.js'
+import { columns, createOutput, type Output } from '../output.js'
 import { writeProjectConfig, type ProjectConfig } from '../project.js'
 import type { StarterEntry } from '../registry/entry.js'
+import { repeatCommand } from '../repeat.js'
 import {
   defaultStarter,
   openRegistry,
@@ -91,6 +92,11 @@ const args = {
     type: 'boolean',
     description: 'Keep the files of the engines that were not chosen',
   },
+  banner: {
+    type: 'boolean',
+    description: 'Draw the wordmark at the start of a guided run',
+    negativeDescription: 'Do not draw the wordmark',
+  },
   setup: {
     type: 'boolean',
     description:
@@ -127,6 +133,8 @@ interface InitOptions {
   baseUrl?: string
   keepEngines: boolean
   setup: boolean
+  /** False when --no-banner was given. */
+  banner?: boolean
   install?: boolean
   force: boolean
   yes: boolean
@@ -141,31 +149,48 @@ function valueOf(name: string, value: unknown): string | undefined {
   return value
 }
 
-async function chooseStarter(
+/** One starter as a choice: its line, the Node it needs and what it is. */
+function starterChoice(entry: StarterEntry): Choice<string> {
+  const { line, requires, description } = entry.druxt
+  const about = description ?? requires.tools.join('; ')
+  return {
+    value: entry.name,
+    label: entry.name,
+    hint: `${line}, Node ${requires.node}. ${about}`.trim(),
+  }
+}
+
+/** The starter the flags name, or the default of the registry. */
+async function namedOrDefaultStarter(
   registry: Registry,
-  options: InitOptions,
-  context: CliContext,
-  canAsk: boolean
+  options: InitOptions
 ): Promise<StarterEntry> {
   if (options.starter) return registry.entry(options.starter)
-
-  const names = await registry.names()
-  if (canAsk && names.length > 1) {
-    const chosen = await context.prompter.select({
-      message: 'Which starter?',
-      choices: names.map((name) => ({ value: name, label: name })),
-    })
-    return registry.entry(chosen)
-  }
-
   const entry = await defaultStarter(registry)
   if (!entry) {
+    const names = await registry.names()
     throw new DrxError(
       'unknown-starter',
       `The registry marks no starter as the default. Pass --starter with one of: ${names.join(', ')}.`
     )
   }
   return entry
+}
+
+async function askStarter(
+  registry: Registry,
+  names: string[],
+  context: CliContext
+): Promise<StarterEntry> {
+  const entries: StarterEntry[] = []
+  for (const name of names) entries.push(await registry.entry(name))
+  const initial = entries.find((entry) => entry.druxt.default)?.name
+  const chosen = await context.prompter.select({
+    message: 'Which starter?',
+    choices: entries.map(starterChoice),
+    ...(initial ? { initial } : {}),
+  })
+  return entries.find((entry) => entry.name === chosen) as StarterEntry
 }
 
 async function chooseLayout(
@@ -184,7 +209,7 @@ async function chooseLayout(
         label: value,
         ...(AVAILABLE_LAYOUTS.includes(value)
           ? {}
-          : { hint: 'not available yet' }),
+          : { hint: 'not available yet', disabled: true }),
       })),
       initial: own,
     })
@@ -279,19 +304,142 @@ function warnAboutStarter(
   return commands
 }
 
-async function runInit(
+/** Everything `init` has settled before it writes anything. */
+interface Plan {
+  entry: StarterEntry
+  layout: Layout
+  engine: EngineChoice | undefined
+  dir: string
+  target: string
+  install: boolean
+}
+
+/** What a guided run is about to do, for the user to confirm. */
+function summary(plan: Plan, options: InitOptions, output: Output): string[] {
+  const { entry, engine } = plan
+  const rows = [
+    ['Create', plan.target],
+    [
+      'From',
+      `the ${entry.name} starter (${entry.druxt.line}), ${plan.layout} layout`,
+    ],
+  ]
+  if (engine) {
+    rows.push([
+      'Backend',
+      engine.baseUrl
+        ? `a backend that exists already, at ${engine.baseUrl}`
+        : `${engine.name} engine${engine.database ? `, ${engine.database} database` : ''}`,
+    ])
+    if (engine.remove.length > 0) {
+      rows.push(
+        options.keepEngines
+          ? ['Keep', 'the files of every engine']
+          : ['Remove', 'the files of the other engines']
+      )
+    }
+    const where = entry.druxt.backendUrl
+    if (engine.writeUrl && where) {
+      rows.push([
+        'Write',
+        `${where.variable}=${engine.writeUrl} to ${where.file}`,
+      ])
+    }
+  }
+  rows.push(['Install', plan.install ? 'yes' : 'no'])
+
+  return [
+    'This will:',
+    // The label of the backend row is in the colour of a backend part.
+    ...columns(rows, '  ').map((line) =>
+      line.replace(
+        /^( +)(Backend)/,
+        (_, indent: string, label: string) =>
+          `${indent}${output.err.role('backend', label)}`
+      )
+    ),
+  ]
+}
+
+/** The arguments that run the same `init` again with nothing to ask. */
+function repeatArguments(plan: Plan, options: InitOptions): string[] {
+  const { engine } = plan
+  return [
+    'init',
+    plan.dir,
+    '--starter',
+    plan.entry.name,
+    '--layout',
+    plan.layout,
+    ...(engine ? ['--engine', engine.name] : []),
+    ...(engine?.database ? ['--database', engine.database] : []),
+    ...(engine?.baseUrl ? ['--base-url', engine.baseUrl] : []),
+    ...(options.registry ? ['--registry', options.registry] : []),
+    ...(options.source ? ['--source', options.source] : []),
+    ...(options.keepEngines ? ['--keep-engines'] : []),
+    plan.install ? '--install' : '--no-install',
+    ...(options.force ? ['--force'] : []),
+    '--yes',
+  ]
+}
+
+/**
+ * Settles every choice, asking for what the flags left out. Nothing is
+ * written here, so cancelling a prompt leaves the disk as it was.
+ */
+async function plan(
+  registry: Registry,
   options: InitOptions,
   context: CliContext,
+  canAsk: boolean
+): Promise<Plan> {
+  // With one starter, or one named, there is no starter to ask about and the
+  // directory prompt can offer that starter's own default.
+  const names = options.starter ? [] : await registry.names()
+  const askForStarter = canAsk && names.length > 1
+  let entry = askForStarter
+    ? undefined
+    : await namedOrDefaultStarter(registry, options)
+
+  const defaultDir = (entry ?? (await defaultStarter(registry)))?.defaultDir
+  const dir =
+    options.dir ??
+    (canAsk
+      ? await context.prompter.text({
+          message: 'Where should the site be created?',
+          initial: defaultDir ?? entry?.name ?? 'my-druxt-site',
+        })
+      : (defaultDir ?? (entry as StarterEntry).name))
+  const target = targetDirectory(context.cwd, dir, options.force)
+
+  entry ??= await askStarter(registry, names, context)
+  const layout = await chooseLayout(entry, options, context, canAsk)
+  const engine = await chooseEngine(entry, options, context, canAsk)
+  const install =
+    options.install ??
+    (canAsk
+      ? await context.prompter.confirm({
+          message: 'Install its dependencies now?',
+          initial: false,
+        })
+      : false)
+
+  return { entry, layout, engine, dir, target, install }
+}
+
+async function runInit(
+  options: InitOptions,
+  shared: CliContext,
   output: Output
 ): Promise<void> {
-  const canAsk = context.interactive && !options.yes
+  // --json never asks: a script reading stdout cannot answer.
+  const canAsk = shared.interactive && !options.yes && !output.json
   if (!options.dir && !canAsk && !options.yes) {
     throw new DrxError(
       'usage',
       'No directory was given and there is no terminal to ask on. Pass a directory, as in "drx init my-site", or --yes to use the default of the starter.'
     )
   }
-
   if (options.setup) {
     throw new DrxError(
       'not-available',
@@ -301,13 +449,46 @@ async function runInit(
   if (options.baseUrl) assertBaseUrl(options.baseUrl)
 
   // Everything that can fail without the network is checked before it is used.
-  const userConfig = await loadUserConfig(context.env)
+  const userConfig = await loadUserConfig(shared.env)
   const source = resolveSource(options.source ?? DEFAULT_SOURCE, userConfig)
   assertSourceAvailable(source)
   if (options.layout) assertLayoutAvailable(options.layout)
   const registryUrl = options.registry
     ? resolveRegistryUrl(options.registry, userConfig)
     : undefined
+
+  // A run that will ask for the basics is a guided one, and opens with the
+  // wordmark. Any other run gets the small header.
+  const guided =
+    canAsk && (!options.dir || !options.layout || options.install === undefined)
+  const drawn =
+    guided &&
+    output.banner({
+      ...(options.banner === undefined ? {} : { flag: options.banner }),
+      ...(userConfig.banner === undefined
+        ? {}
+        : { configured: userConfig.banner }),
+    })
+  if (!drawn) output.header()
+
+  // The prompts are counted, so a run that asked for something can end by
+  // saying how to repeat it without being asked.
+  let asked = 0
+  const counting =
+    <T extends unknown[], R>(ask: (...args: T) => Promise<R>) =>
+    (...args: T) => {
+      asked += 1
+      return ask(...args)
+    }
+  const context: CliContext = {
+    ...shared,
+    prompter: {
+      text: counting(shared.prompter.text),
+      select: counting(shared.prompter.select) as Prompter['select'],
+      search: counting(shared.prompter.search) as Prompter['search'],
+      confirm: counting(shared.prompter.confirm),
+    },
+  }
 
   const registry = await openRegistry({
     ...(registryUrl ? { url: registryUrl } : {}),
@@ -319,33 +500,32 @@ async function runInit(
   if (registry.origin === 'bundled') {
     output.note(`${registry.fallbackReason}`)
     output.note('Reading starters from the copy bundled with this version.')
+  } else if (output.decorated) {
+    output.done(`Read the starters from ${registry.location}.`)
   } else {
     output.note(`Reading starters from ${registry.location}.`)
   }
 
-  const entry = await chooseStarter(registry, options, context, canAsk)
-  const layout = await chooseLayout(entry, options, context, canAsk)
-  const engine = await chooseEngine(entry, options, context, canAsk)
-
-  const defaultDir = entry.defaultDir ?? entry.name
-  const dir =
-    options.dir ??
-    (canAsk
-      ? await context.prompter.text({
-          message: 'Where should the site be created?',
-          initial: defaultDir,
-        })
-      : defaultDir)
-  const target = targetDirectory(context.cwd, dir, options.force)
-
-  const install =
-    options.install ??
-    (canAsk
-      ? await context.prompter.confirm({
-          message: 'Install its dependencies now?',
-          initial: false,
-        })
-      : false)
+  let settled: Plan
+  try {
+    settled = await plan(registry, options, context, canAsk)
+    if (asked > 0) {
+      output.line()
+      for (const line of summary(settled, options, output)) output.line(line)
+      output.line()
+      const go = await context.prompter.confirm({
+        message: 'Create the site?',
+        initial: true,
+      })
+      if (!go) throw new DrxError('cancelled', 'Cancelled.')
+    }
+  } catch (error) {
+    if (error instanceof DrxError && error.code === 'cancelled') {
+      throw new DrxError('cancelled', 'Cancelled. Nothing was written.')
+    }
+    throw error
+  }
+  const { entry, layout, engine, target, install } = settled
 
   output.note(`Fetching the ${entry.name} starter from ${entry.tar}.`)
   try {
@@ -373,6 +553,7 @@ async function runInit(
       `Could not fetch the ${entry.name} starter: ${detail}`
     )
   }
+  output.done(`Fetched the ${entry.name} starter.`)
 
   let removed: string[] = []
   if (engine && !options.keepEngines) {
@@ -429,6 +610,7 @@ async function runInit(
         `The site was created in ${target}, but installing its dependencies failed: ${detail}`
       )
     }
+    output.done('Installed dependencies.')
   }
 
   const fromCwd = relative(context.cwd, target)
@@ -471,6 +653,13 @@ async function runInit(
         : []),
     ].join('\n')
   )
+
+  if (asked > 0) {
+    output.line()
+    output.line(
+      `Repeat this with: ${repeatCommand(repeatArguments(settled, options))}`
+    )
+  }
 }
 
 export function initCommand(context: CliContext) {
@@ -504,6 +693,7 @@ export function initCommand(context: CliContext) {
       if (source) options.source = source
       if (isLayout(parsed.layout)) options.layout = parsed.layout
       if (typeof parsed.install === 'boolean') options.install = parsed.install
+      if (typeof parsed.banner === 'boolean') options.banner = parsed.banner
 
       await runInit(
         options,

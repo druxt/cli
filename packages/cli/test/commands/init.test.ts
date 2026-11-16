@@ -54,6 +54,7 @@ function scripted(answers: unknown[]) {
     return answers.shift()
   }
   const prompter: Prompter = {
+    search: async ({ message }) => next(message) as never,
     text: async ({ message }) => next(message) as string,
     select: async ({ message }) => next(message) as never,
     confirm: async ({ message }) => next(message) as boolean,
@@ -209,13 +210,19 @@ describe('drx init with no terminal', () => {
 
 describe('drx init at a terminal', () => {
   test('asks for what the flags left out', async () => {
-    const { prompter, asked } = scripted(['monorepo', 'asked-site', false])
+    const { prompter, asked } = scripted([
+      'asked-site',
+      'monorepo',
+      false,
+      true,
+    ])
     const result = await init([], { interactive: true, prompter })
     expect(result.code).toBe(0)
     expect(asked).toEqual([
-      'Which layout?',
       'Where should the site be created?',
+      'Which layout?',
       'Install its dependencies now?',
+      'Create the site?',
     ])
     expect(existsSync(join(cwd, 'asked-site', 'drx.config.json'))).toBe(true)
   })
@@ -228,10 +235,19 @@ describe('drx init at a terminal', () => {
       ...registry.entry,
       name: 'second',
     })
-    const { prompter, asked } = scripted(['second', 'monorepo', 'site', false])
+    const { prompter, asked } = scripted([
+      'site',
+      'second',
+      'monorepo',
+      false,
+      true,
+    ])
     const result = await init([], { interactive: true, prompter })
     expect(result.code).toBe(0)
-    expect(asked[0]).toBe('Which starter?')
+    expect(asked.slice(0, 2)).toEqual([
+      'Where should the site be created?',
+      'Which starter?',
+    ])
     expect(readJson(join(cwd, 'site', 'drx.config.json')).starter).toBe(
       'second'
     )

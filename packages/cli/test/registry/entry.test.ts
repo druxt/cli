@@ -146,6 +146,7 @@ describe('validateEntry', () => {
     ],
     ['druxt.default', 'yes', 'druxt.default must be true or false'],
     ['druxt.steps', 'npm run dev', 'druxt.steps must be an array of strings'],
+    ['druxt.description', 7, 'druxt.description must be a string'],
   ])('names the bad field: %s = %j', (path, value, message) => {
     const attempt = () => validateEntry(entryWith(path, value), 'quickstart')
     expect(attempt).toThrow(DrxError)

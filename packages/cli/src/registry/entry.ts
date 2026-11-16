@@ -80,6 +80,8 @@ export interface StarterDetails {
    * the backend exists already.
    */
   steps?: string[]
+  /** One sentence on what the starter is, for the prompt that lists it. */
+  description?: string
   /** The ways the backend can be run. Supersedes `requires.commands`. */
   engines?: StarterEngine[]
   backendUrl?: BackendUrlTarget
@@ -267,6 +269,12 @@ function entryProblem(entry: unknown): string | undefined {
   }
   if (druxt.steps !== undefined && !isStringArray(druxt.steps)) {
     return 'druxt.steps must be an array of strings'
+  }
+  if (
+    druxt.description !== undefined &&
+    typeof druxt.description !== 'string'
+  ) {
+    return 'druxt.description must be a string'
   }
   return enginesProblem(druxt.engines) ?? backendUrlProblem(druxt.backendUrl)
 }

@@ -8,7 +8,11 @@ afterEach(cleanTmp)
 describe('drx', () => {
   test('--version prints the version and nothing else', async () => {
     const result = await run(['--version'])
-    expect(result).toEqual({ code: 0, stdout: `${cliVersion()}\n`, stderr: '' })
+    expect(result).toMatchObject({
+      code: 0,
+      stdout: `${cliVersion()}\n`,
+      stderr: '',
+    })
   })
 
   test('--help lists the commands', async () => {
