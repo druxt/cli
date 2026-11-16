@@ -77,6 +77,61 @@ describe('loadProjectConfig', () => {
     )
   })
 
+  test('keeps the record of the modules that were added', async () => {
+    const root = tmp()
+    const recorded: ProjectConfig = {
+      ...config,
+      modules: [
+        {
+          name: 'breadcrumb',
+          package: 'druxt-breadcrumb',
+          backend: [
+            {
+              path: 'drupal',
+              modules: [
+                {
+                  name: 'decoupled_router',
+                  package: 'drupal/decoupled_router',
+                },
+              ],
+              patches: [
+                {
+                  package: 'drupal/core',
+                  description: 'Fix',
+                  url: 'https://example.com/1.diff',
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }
+    await writeProjectConfig(root, recorded)
+    expect(await loadProjectConfig(root)).toEqual(recorded)
+  })
+
+  test.each([
+    [{ modules: 'breadcrumb' }, 'modules must be an array'],
+    [
+      { modules: [{ package: 'x' }] },
+      'modules[0].name must be a non-empty string',
+    ],
+    [
+      { modules: [{ name: 'x' }] },
+      'modules[0].package must be a non-empty string',
+    ],
+    [
+      { modules: [{ name: 'x', package: 'y', backend: {} }] },
+      'modules[0].backend must be an array',
+    ],
+  ])('names the bad field of the record in %j', async (extra, message) => {
+    const root = tmp()
+    writeTree(root, { 'drx.config.json': { ...config, ...extra } })
+    await expect(loadProjectConfig(root)).rejects.toThrow(
+      `${join(root, 'drx.config.json')} is invalid: ${message}.`
+    )
+  })
+
   test('reads a file again after it has changed', async () => {
     const root = tmp()
     await writeProjectConfig(root, config)

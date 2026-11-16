@@ -3,10 +3,11 @@ import { writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { loadConfig } from 'c12'
+import type { BackendRecord } from './adapters/adapter.js'
 import { DrxError } from './errors.js'
 import { isLayout, LAYOUTS, type Layout } from './layouts.js'
 import { partsProblem, type Part } from './parts.js'
-import { isNonEmptyString } from './validate.js'
+import { isNonEmptyString, isRecord } from './validate.js'
 
 const nodeRequire = createRequire(import.meta.url)
 
@@ -27,6 +28,18 @@ export interface ProjectConfig {
   /** The name of the source its Druxt packages come from. */
   source: string
   parts: Part[]
+  /** What `drx add` did, so `drx remove` undoes that and no more. */
+  modules?: ModuleRecord[]
+}
+
+/** One module the CLI added to the project. */
+export interface ModuleRecord {
+  /** The name of the module in the registry. */
+  name: string
+  /** Its frontend package. */
+  package: string
+  /** What was done to each backend part, by the part's path. */
+  backend: ({ path: string } & BackendRecord)[]
 }
 
 export async function writeProjectConfig(
@@ -58,7 +71,24 @@ function configProblem(config: Record<string, unknown>): string | undefined {
       return `${key} must be a non-empty string`
     }
   }
-  return partsProblem(config.parts, 'parts')
+  const parts = partsProblem(config.parts, 'parts')
+  if (parts) return parts
+
+  const modules = config.modules
+  if (modules === undefined) return undefined
+  if (!Array.isArray(modules)) return 'modules must be an array'
+  for (const [index, module] of modules.entries()) {
+    const at = `modules[${index}]`
+    for (const key of ['name', 'package']) {
+      if (!isRecord(module) || !isNonEmptyString(module[key])) {
+        return `${at}.${key} must be a non-empty string`
+      }
+    }
+    if (!Array.isArray((module as Record<string, unknown>).backend)) {
+      return `${at}.backend must be an array`
+    }
+  }
+  return undefined
 }
 
 /** Reads and checks the config file of the project rooted at `root`. */
@@ -98,5 +128,6 @@ export async function loadProjectConfig(root: string): Promise<ProjectConfig> {
     starter: config.starter as string,
     source: config.source as string,
     parts: config.parts as Part[],
+    ...(config.modules ? { modules: config.modules as ModuleRecord[] } : {}),
   }
 }

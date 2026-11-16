@@ -16,6 +16,8 @@ export interface EngineCommand {
 export interface EngineAdapter {
   /** The value a part's `engine` holds. */
   readonly name: string
+  /** False when the backend is somewhere this machine cannot run tools in. */
+  readonly local: boolean
   /**
    * The command line that runs a backend tool, such as its package manager,
    * with the given arguments.
@@ -30,6 +32,7 @@ export interface EngineAdapter {
 export function wrappingEngine(name: string): EngineAdapter {
   return {
     name,
+    local: true,
     run: (part, command, args) => ({
       command: name,
       args: [command, ...args],

@@ -5,6 +5,7 @@ import type { EngineAdapter } from './engine.js'
 /** A backend that runs somewhere else. Nothing can be run in it from here. */
 export const noEngine: EngineAdapter = {
   name: EXISTING_BACKEND,
+  local: false,
   run(_part, command, args) {
     throw new DrxError(
       'not-available',

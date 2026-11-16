@@ -7,6 +7,7 @@ import type { EngineAdapter } from './engine.js'
  */
 export const phpEngine: EngineAdapter = {
   name: 'php',
+  local: true,
   run: (part, command, args) => ({
     command: command === 'composer' ? command : `vendor/bin/${command}`,
     args,
