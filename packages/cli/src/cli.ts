@@ -6,6 +6,7 @@ import {
   type ArgsDef,
   type CommandDef,
 } from 'citty'
+import { addCommand, removeCommand } from './commands/change.js'
 import { infoCommand } from './commands/info.js'
 import { initCommand } from './commands/init.js'
 import { runMenu } from './commands/menu.js'
@@ -34,7 +35,12 @@ function mainCommand(context: CliContext): CommandDef {
     subCommands: {
       init: initCommand(context),
       info: infoCommand(context),
-      module: moduleCommand(context),
+      add: addCommand(context),
+      remove: removeCommand(context),
+      module: moduleCommand(context, {
+        add: addCommand(context, 'module add'),
+        remove: removeCommand(context, 'module remove'),
+      }),
     },
   })
 }

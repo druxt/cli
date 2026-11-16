@@ -11,6 +11,8 @@ export type DrxErrorCode =
   | 'config'
   | 'download'
   | 'install'
+  | 'refused'
+  | 'step-failed'
   | 'cancelled'
 
 /**

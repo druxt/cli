@@ -67,8 +67,19 @@ const COMMANDS: { argv: string[]; code: number; says?: string }[] = [
   { argv: ['module', 'search'], code: 1, says: 'Give the text to search for' },
   { argv: ['module', 'info', 'blocks'], code: 0 },
   { argv: ['module', 'info'], code: 1, says: 'Give the name of a module' },
-  { argv: ['module', 'add', 'blocks'], code: 1, says: 'not available yet' },
-  { argv: ['module', 'remove', 'blocks'], code: 1, says: 'not available yet' },
+  { argv: ['add', 'blocks'], code: 1, says: 'works inside a project' },
+  { argv: ['add'], code: 1, says: 'works inside a project' },
+  { argv: ['remove', 'blocks'], code: 1, says: 'works inside a project' },
+  {
+    argv: ['module', 'add', 'blocks'],
+    code: 1,
+    says: 'works inside a project',
+  },
+  {
+    argv: ['module', 'remove', 'blocks'],
+    code: 1,
+    says: 'works inside a project',
+  },
   {
     argv: ['module', 'configure', 'blocks'],
     code: 1,

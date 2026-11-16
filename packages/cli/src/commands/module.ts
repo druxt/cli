@@ -1,4 +1,4 @@
-import { defineCommand, type ArgsDef } from 'citty'
+import { defineCommand, type ArgsDef, type CommandDef } from 'citty'
 import { assertKnownOptions } from '../args.js'
 import type { CliContext } from '../context.js'
 import { DrxError } from '../errors.js'
@@ -17,7 +17,7 @@ import { columns, createOutput, type Output } from '../output.js'
 import { repeatCommand } from '../repeat.js'
 import { loadUserConfig, resolveModuleRegistryUrl } from '../user-config.js'
 
-const registryArgs = {
+export const registryArgs = {
   'module-registry': {
     type: 'string',
     valueHint: 'url',
@@ -64,7 +64,7 @@ function valueOf(parsed: Parsed, name: string): string | undefined {
 }
 
 /** Loads the registry the flags name and says on stderr where it came from. */
-async function openModules(
+export async function openModules(
   context: CliContext,
   parsed: Parsed,
   output: Output
@@ -317,7 +317,10 @@ function closestNames(modules: ModuleEntry[], wanted: string): string[] {
     .map(({ name }) => name)
 }
 
-function findModule(modules: ModuleEntry[], wanted: string): ModuleEntry {
+export function findModule(
+  modules: ModuleEntry[],
+  wanted: string
+): ModuleEntry {
   const name = wanted.toLowerCase()
   const found = modules.find(
     (module) =>
@@ -515,13 +518,19 @@ function notAvailable(name: string, description: string) {
   })
 }
 
-export function moduleCommand(context: CliContext) {
+/**
+ * The `module` group. The commands that change a project are handed in, as
+ * they are the top-level `add` and `remove` under a second name.
+ */
+export function moduleCommand(
+  context: CliContext,
+  changing: Record<string, CommandDef>
+) {
   const subCommands = {
     list: listCommand(context),
     search: searchCommand(context),
     info: infoCommand(context),
-    add: notAvailable('add', 'Install a module and add it to the project'),
-    remove: notAvailable('remove', 'Take a module out of the project'),
+    ...changing,
     configure: notAvailable('configure', 'Set the options of a module'),
   }
   return defineCommand({

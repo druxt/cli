@@ -18,8 +18,8 @@ const INSIDE: Choice<string>[] = [
   { value: 'search', label: 'Search the modules' },
   { value: 'show', label: 'Show a module' },
   { value: 'info', label: 'Show this project' },
-  { value: 'add', label: 'Add a module', ...NOT_YET },
-  { value: 'remove', label: 'Remove a module', ...NOT_YET },
+  { value: 'add', label: 'Add a module' },
+  { value: 'remove', label: 'Remove a module' },
   { value: 'configure', label: 'Configure a module', ...NOT_YET },
   { value: 'patches', label: 'Manage patches', ...NOT_YET },
   { value: 'quit', label: 'Quit' },
@@ -96,8 +96,10 @@ export async function runMenu(
       const text = await context.prompter.text({ message: 'Search for what?' })
       return repeatable(['module', 'search', text])
     }
+    // Each of these picks its modules and says how to repeat itself.
     case 'add':
     case 'remove':
+      return run([choice])
     case 'configure':
       return run(['module', choice])
     default:
