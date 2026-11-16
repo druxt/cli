@@ -5,6 +5,7 @@
   "url": "https://github.com/druxt/quickstart",
   "druxt": {
     "line": "0.x",
+    "description": "Drupal 11, Nuxt 2 and Druxt 1 in one repository",
     "layout": "monorepo",
     "parts": [
       { "role": "frontend", "kind": "nuxt", "path": "nuxt" },
