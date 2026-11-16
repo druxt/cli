@@ -11,7 +11,7 @@ export interface RunResult {
 
 /**
  * Runs the CLI in-process with captured output, no terminal, a fixed Node
- * version and a user configuration directory that is empty.
+ * version, and user configuration and cache directories that are empty.
  */
 export async function run(
   argv: string[],
@@ -22,6 +22,7 @@ export async function run(
   const code = await runCli(argv, {
     cwd: tmp(),
     env: { XDG_CONFIG_HOME: tmp('drx-config-') },
+    cacheDir: tmp('drx-cache-'),
     stdout: { write: (chunk) => (stdout += chunk) },
     stderr: { write: (chunk) => (stderr += chunk) },
     interactive: false,

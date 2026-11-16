@@ -1,6 +1,9 @@
 import { downloadTemplate } from 'giget'
 import { findOnPath } from './commands-on-path.js'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { installDependencies } from './install.js'
+import { DEFAULT_MODULE_REGISTRY } from './modules/registry.js'
 import { bundledRegistryDir } from './package-root.js'
 import { terminalPrompter } from './prompts.js'
 import { DEFAULT_REGISTRY } from './registry/registry.js'
@@ -50,12 +53,27 @@ export interface CliContext {
   defaultRegistry: string
   /** The copy of the registry used when the default cannot be read. */
   bundledRegistryDir: string
+  /** The module registry used when `--module-registry` is not given. */
+  defaultModuleRegistry: string
+  /** The directory the CLI keeps what it can fetch again in. */
+  cacheDir: string
   /** Fetches and unpacks a template. giget's `downloadTemplate`. */
   download: typeof downloadTemplate
   /** Installs the dependencies of the site in a directory. */
   install: (dir: string) => Promise<void>
   /** The file a command name resolves to on PATH, or undefined. */
   findCommand: (name: string) => string | undefined
+}
+
+/**
+ * `DRX_CACHE_DIR`, or `drx` under the user's cache directory.
+ */
+export function cacheDirectory(
+  env: Record<string, string | undefined>
+): string {
+  if (env.DRX_CACHE_DIR) return env.DRX_CACHE_DIR
+  const base = env.XDG_CACHE_HOME ?? join(env.HOME ?? homedir(), '.cache')
+  return join(base, 'drx')
 }
 
 export function defaultContext(): CliContext {
@@ -71,6 +89,8 @@ export function defaultContext(): CliContext {
     prompter: terminalPrompter(),
     defaultRegistry: DEFAULT_REGISTRY,
     bundledRegistryDir: bundledRegistryDir(),
+    defaultModuleRegistry: DEFAULT_MODULE_REGISTRY,
+    cacheDir: cacheDirectory(process.env),
     download: downloadTemplate,
     install: (dir) => installDependencies(dir),
     findCommand: (name) => findOnPath(name),

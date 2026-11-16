@@ -6,6 +6,7 @@ export type DrxErrorCode =
   | 'invalid-entry'
   | 'unknown-starter'
   | 'unknown-source'
+  | 'unknown-module'
   | 'directory-not-empty'
   | 'config'
   | 'download'
