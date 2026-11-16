@@ -36,3 +36,7 @@ COLORTERM
 truecolor
 wordmark
 magicast
+cweagans
+docroot
+relock
+repatch

@@ -79,10 +79,8 @@ export interface RemoveRequest {
 
 /** What an add did to a backend part, kept so a remove undoes that and no more. */
 export interface BackendRecord {
-  /** The modules it enabled that were not there before. */
-  enabled: string[]
-  /** The packages it required. */
-  required: string[]
+  /** The modules it required and enabled, which were not there before. */
+  modules: { name: string; package: string }[]
   /** The patches it wrote. */
   patches: { package: string; description: string; url: string }[]
 }

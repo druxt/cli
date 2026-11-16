@@ -1,10 +1,7 @@
 import { join } from 'node:path'
 import { isRecord } from '../validate.js'
-import {
-  emptyChange,
-  type KindAdapter,
-  type PackageVersion,
-} from './adapter.js'
+import type { KindAdapter, PackageVersion } from './adapter.js'
+import { planBackendAdd, planBackendRemove } from './drupal-modules.js'
 import { readJsonObject, stringMap } from './read-json.js'
 
 /** Any of these in `require` makes a Composer project a Drupal site. */
@@ -60,6 +57,6 @@ export const drupalAdapter: KindAdapter = {
   druxt: async () => undefined,
   package: async () => undefined,
 
-  addModule: async () => emptyChange(),
-  removeModule: async () => emptyChange(),
+  addModule: planBackendAdd,
+  removeModule: planBackendRemove,
 }
