@@ -35,3 +35,4 @@ alacritty
 COLORTERM
 truecolor
 wordmark
+magicast
