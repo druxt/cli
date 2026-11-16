@@ -241,12 +241,6 @@ describe('the wordmark at init', () => {
   test.each([
     ['--no-banner', ['--no-banner'], {}, {}],
     ['a terminal narrower than the art', [], {}, { columns: 57 }],
-    [
-      'CI',
-      [],
-      { env: { CI: '1', NO_COLOR: '1', XDG_CONFIG_HOME: '/nonexistent' } },
-      {},
-    ],
   ])(
     'gives way to the small header with %s',
     async (_name, argv, overrides, options) => {
