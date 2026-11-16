@@ -559,7 +559,7 @@ async function runInit(
   if (engine && !options.keepEngines) {
     removed = await removeEngineFiles(target, engine.remove, engine.keep)
     if (removed.length > 0) {
-      output.note(
+      output.did(
         `Removed the files of the engines not chosen: ${removed.join(', ')}.`
       )
     }
@@ -568,9 +568,7 @@ async function runInit(
     const where = entry.druxt.backendUrl
     if (where) {
       await writeBackendUrl(target, where, engine.writeUrl)
-      output.note(
-        `Wrote ${where.variable}=${engine.writeUrl} to ${where.file}.`
-      )
+      output.did(`Wrote ${where.variable}=${engine.writeUrl} to ${where.file}.`)
     } else if (engine.baseUrl) {
       output.warn(
         `The ${entry.name} starter does not say where it reads its backend URL from. Point it at ${engine.baseUrl} yourself.`

@@ -25,8 +25,9 @@ describe('output without a terminal', () => {
     output.header()
     output.note('Reading.')
     output.done('Read.')
+    output.did('Removed a file.')
     output.warn('Careful.')
-    expect(read().stderr).toBe('Reading.\nWarning: Careful.\n')
+    expect(read().stderr).toBe('Reading.\nRemoved a file.\nWarning: Careful.\n')
     expect(output.decorated).toBe(false)
   })
 })
@@ -59,7 +60,8 @@ describe('output in a terminal', () => {
     const output = createOutput(made, false)
     output.note('Reading.')
     output.done('Read.')
-    expect(read().stderr).toBe('* Reading.\n+ Read.\n')
+    output.did('Removed a file.')
+    expect(read().stderr).toBe('* Reading.\n+ Read.\n+ Removed a file.\n')
   })
 
   test('is plain with --json, and the result is JSON alone', () => {

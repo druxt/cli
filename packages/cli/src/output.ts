@@ -26,6 +26,8 @@ export interface Output {
   note(message: string): void
   /** A step that finished. Printed in a terminal only. */
   done(message: string): void
+  /** Something that was done, said once it is done. Printed everywhere. */
+  did(message: string): void
   /** Something the user should know that does not stop the command. */
   warn(message: string): void
   /** A line on stderr with nothing added. */
@@ -63,6 +65,7 @@ export function createOutput(context: CliContext, json: boolean): Output {
     done: (message) => {
       if (decorated) write(marked('done', message))
     },
+    did: (message) => write(marked('done', message)),
     warn: (message) => write(marked('warning', `Warning: ${message}`)),
     line: (message = '') => write(message),
     header() {
