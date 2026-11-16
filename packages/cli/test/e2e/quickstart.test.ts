@@ -52,14 +52,14 @@ describe.skipIf(process.env.DRX_E2E !== '1')('the quickstart starter', () => {
     )
     expect(created.code).toBe(0)
     const site = join(cwd, 'site')
+    // The starter's own scripts run the local tooling in drupal/.devtools whatever the engine, so it stays.
     expect(JSON.parse(created.stdout).removed).toEqual([
-      'drupal/.devtools',
-      'drupal/Makefile',
       'drupal/.ddev/config.yaml',
       'drupal/.ddev/docker-compose.env.yaml',
       'drupal/.ddev/docker-compose.network-mtu.yaml',
     ])
     expect(existsSync(join(site, 'drupal/.lando.yml'))).toBe(true)
+    expect(existsSync(join(site, 'drupal/.devtools'))).toBe(true)
     expect(
       existsSync(join(site, 'drupal/.ddev/commands/web/drupal-install'))
     ).toBe(true)

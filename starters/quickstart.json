@@ -32,7 +32,7 @@
         "notes": [
           "This engine does not run on Windows itself. Use WSL2 there, or another engine."
         ],
-        "files": ["drupal/.devtools", "drupal/Makefile"]
+        "files": []
       },
       {
         "name": "ddev",
