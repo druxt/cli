@@ -1,0 +1,225 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { afterEach, describe, expect, test } from 'vitest'
+import { adapterFor } from '../../src/adapters/index.js'
+import type { ModuleChange } from '../../src/adapters/adapter.js'
+import { cleanTmp, tmp, writeTree } from '../helpers/tmp.js'
+
+afterEach(cleanTmp)
+
+const nuxt = adapterFor('nuxt')!
+/** The quickstart starter's own config, byte for byte. */
+const QUICKSTART = readFileSync(
+  fileURLToPath(
+    new URL('../fixtures/quickstart-nuxt.config.js', import.meta.url)
+  ),
+  'utf8'
+)
+const NUXT_4 = `// https://nuxt.com/docs/api/configuration/nuxt-config
+export default defineNuxtConfig({
+  compatibilityDate: '2025-07-15',
+  devtools: { enabled: true },
+  modules: ['@nuxt/eslint'],
+})
+`
+
+const add = (dir: string, name = 'druxt-breadcrumb') =>
+  nuxt.addModule(dir, {
+    package: name,
+    needs: [],
+    patches: true,
+    registryStatesCore: false,
+  })
+const remove = (dir: string, name = 'druxt-breadcrumb') =>
+  nuxt.removeModule(dir, { package: name, stillNeeded: [] })
+
+const runs = (change: ModuleChange) =>
+  change.steps.flatMap((step) => ('run' in step ? [step.run] : []))
+const edits = (change: ModuleChange) =>
+  change.steps.flatMap((step) => ('edit' in step ? [step.edit] : []))
+
+function part(files: Record<string, unknown>): string {
+  const dir = tmp('drx-part-')
+  writeTree(dir, { 'package.json': {}, ...files })
+  return dir
+}
+
+describe('the package manager of a frontend part', () => {
+  test.each([
+    [
+      'package-lock.json',
+      'npm',
+      ['install', 'druxt-breadcrumb'],
+      ['uninstall', 'druxt-breadcrumb'],
+    ],
+    [
+      'pnpm-lock.yaml',
+      'pnpm',
+      ['add', 'druxt-breadcrumb'],
+      ['remove', 'druxt-breadcrumb'],
+    ],
+    [
+      'yarn.lock',
+      'yarn',
+      ['add', 'druxt-breadcrumb'],
+      ['remove', 'druxt-breadcrumb'],
+    ],
+    [
+      'bun.lock',
+      'bun',
+      ['add', 'druxt-breadcrumb'],
+      ['remove', 'druxt-breadcrumb'],
+    ],
+    [
+      'README.md',
+      'npm',
+      ['install', 'druxt-breadcrumb'],
+      ['uninstall', 'druxt-breadcrumb'],
+    ],
+  ])('with %s is %s', async (lock, tool, installArgs, removeArgs) => {
+    const dir = part({
+      [lock]: '',
+      'package.json': { dependencies: { 'druxt-breadcrumb': '^0.1.0' } },
+      'nuxt.config.js': 'export default { modules: [] }\n',
+    })
+    expect(runs(await add(part({ [lock]: '' })))).toEqual([
+      { tool, args: installArgs },
+    ])
+    expect(runs(await remove(dir))).toEqual([{ tool, args: removeArgs }])
+  })
+})
+
+describe('adding a module to the Nuxt 2 config of the quickstart', () => {
+  test('appends it to modules and changes nothing else', async () => {
+    const dir = part({ 'nuxt.config.js': QUICKSTART })
+    const [edit] = edits(await add(dir))
+    expect(edit?.file).toBe('nuxt.config.js')
+    expect(edit?.summary).toBe(
+      "Add 'druxt-breadcrumb' to modules in nuxt.config.js"
+    )
+    expect(edit?.content).toBe(
+      QUICKSTART.replace(
+        '    localhostListenURL\n  ],',
+        "    localhostListenURL,\n    'druxt-breadcrumb'\n  ],"
+      )
+    )
+    expect(edit?.content).not.toBe(QUICKSTART)
+  })
+
+  test('installs before it edits', async () => {
+    const dir = part({ 'nuxt.config.js': QUICKSTART })
+    const change = await add(dir)
+    expect(change.steps.map((step) => Object.keys(step)[0])).toEqual([
+      'run',
+      'edit',
+    ])
+    expect(change.manual).toEqual([])
+  })
+
+  test('leaves a module that is already listed, alone or with options', async () => {
+    const dir = part({ 'nuxt.config.js': QUICKSTART })
+    for (const name of ['druxt-site', 'druxt-auth']) {
+      const change = await add(dir, name)
+      expect(edits(change)).toEqual([])
+      expect(change.notes).toContain(
+        `${name} is already in modules in nuxt.config.js.`
+      )
+    }
+  })
+
+  test('takes a module out again, and gives the file back as it was', async () => {
+    const dir = part({ 'nuxt.config.js': QUICKSTART })
+    const [added] = edits(await add(dir))
+    writeTree(dir, {
+      'nuxt.config.js': added?.content,
+      'package.json': { dependencies: { 'druxt-breadcrumb': '^0.1.0' } },
+    })
+    const change = await remove(dir)
+    expect(edits(change)[0]?.content).toBe(QUICKSTART)
+    expect(edits(change)[0]?.summary).toBe(
+      "Remove 'druxt-breadcrumb' from modules in nuxt.config.js"
+    )
+  })
+
+  test('takes out a module listed with its options', async () => {
+    const dir = part({
+      'nuxt.config.js': QUICKSTART,
+      'package.json': { dependencies: { 'druxt-auth': '^0.4.0' } },
+    })
+    const content = edits(await remove(dir, 'druxt-auth'))[0]?.content
+    expect(content).not.toContain('druxt-auth')
+    expect(content).toContain("'druxt-site',")
+  })
+})
+
+describe('adding a module to a Nuxt 4 config', () => {
+  test('appends it inside defineNuxtConfig', async () => {
+    const dir = part({ 'nuxt.config.ts': NUXT_4 })
+    const [edit] = edits(await add(dir, '@druxt/site'))
+    expect(edit?.file).toBe('nuxt.config.ts')
+    expect(edit?.content).toBe(
+      NUXT_4.replace("['@nuxt/eslint']", "['@nuxt/eslint', '@druxt/site']")
+    )
+  })
+
+  test('adds the modules key when the config has none', async () => {
+    const dir = part({
+      'nuxt.config.ts': 'export default defineNuxtConfig({\n  ssr: true,\n})\n',
+    })
+    const content = edits(await add(dir, '@druxt/site'))[0]?.content
+    // A key the file did not have is written in the printer's own style.
+    expect(content).toMatch(/modules: \[["']@druxt\/site["']\]/)
+    expect(content).toContain('ssr: true')
+  })
+})
+
+describe('a config that cannot be edited safely', () => {
+  test.each([
+    ['a function', 'export default () => ({ modules: [] })\n'],
+    [
+      'modules held in a variable',
+      "const list = ['a']\nexport default { modules: list }\n",
+    ],
+    ['modules built by a call', 'export default { modules: build() }\n'],
+    ['a file that does not parse', 'export default {{{\n'],
+  ])(
+    'is left alone when it is %s, with the line to add',
+    async (_name, config) => {
+      const dir = part({ 'nuxt.config.js': config })
+      const change = await add(dir)
+      expect(edits(change)).toEqual([])
+      expect(runs(change)).toHaveLength(1)
+      expect(change.manual).toEqual([
+        "Add 'druxt-breadcrumb' to the modules array in nuxt.config.js. It could not be edited safely.",
+      ])
+    }
+  )
+
+  test('is said to be missing when there is no config file', async () => {
+    const change = await add(part({}))
+    expect(change.manual).toEqual([
+      "Add 'druxt-breadcrumb' to the modules array of the config. No config file was found.",
+    ])
+  })
+})
+
+describe('a package the part already has', () => {
+  test('is not installed again', async () => {
+    const dir = part({
+      'package.json': { dependencies: { 'druxt-breadcrumb': '^0.1.0' } },
+      'nuxt.config.js': QUICKSTART,
+    })
+    const change = await add(dir)
+    expect(runs(change)).toEqual([])
+    expect(change.notes).toContain(
+      'druxt-breadcrumb is already a dependency in package.json.'
+    )
+    expect(edits(change)).toHaveLength(1)
+  })
+
+  test('is not uninstalled when the part does not have it', async () => {
+    const dir = part({ 'nuxt.config.js': QUICKSTART })
+    const change = await remove(dir)
+    expect(change.steps).toEqual([])
+  })
+})

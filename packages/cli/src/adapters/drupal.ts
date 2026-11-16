@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { isRecord } from '../validate.js'
 import {
-  addModuleNotAvailable,
+  emptyChange,
   type KindAdapter,
   type PackageVersion,
 } from './adapter.js'
@@ -60,5 +60,6 @@ export const drupalAdapter: KindAdapter = {
   druxt: async () => undefined,
   package: async () => undefined,
 
-  addModule: addModuleNotAvailable,
+  addModule: async () => emptyChange(),
+  removeModule: async () => emptyChange(),
 }

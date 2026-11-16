@@ -7,6 +7,9 @@ CHANGELOG.md
 .vale/
 packages/cli/starters/
 
+# Copies of real files, kept byte for byte so an edit to one can be compared.
+packages/cli/test/fixtures/
+
 # Pipeline definitions are owned by yamllint, not prettier. The two disagree on
 # comment spacing, and letting both format these files means each run of one
 # undoes the other.
