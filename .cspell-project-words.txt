@@ -31,3 +31,7 @@ vitest
 yamllint
 drush
 PATHEXT
+alacritty
+COLORTERM
+truecolor
+wordmark
