@@ -12,6 +12,8 @@ import { DEFAULT_REGISTRY } from './registry/registry.js'
 export interface TextStream {
   write(chunk: string): unknown
   isTTY?: boolean
+  /** The width of the terminal, when the stream is one. */
+  columns?: number
 }
 
 export interface Choice<T extends string> {
