@@ -199,10 +199,12 @@ describe('the bundled registry', () => {
       'https://codeload.github.com/druxt/quickstart/tar.gz/refs/heads/develop'
     )
     expect(starter.druxt.default).toBe(true)
-    expect(starter.druxt.requires.commands).toEqual([
-      ['php', 'composer'],
-      ['ddev'],
+    expect(starter.druxt.engines?.map(({ name }) => name)).toEqual([
+      'php',
+      'ddev',
+      'lando',
     ])
+    expect(starter.druxt.backendUrl?.variable).toBe('BASE_URL')
     expect((await defaultStarter(registry))?.name).toBe('quickstart')
   })
 })

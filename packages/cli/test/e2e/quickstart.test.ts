@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { openRegistry } from '../../src/registry/registry.js'
 import { run } from '../helpers/run.js'
 import { cleanTmp, tmp } from '../helpers/tmp.js'
 
@@ -16,6 +17,56 @@ describe.skipIf(process.env.DRX_E2E !== '1')('the quickstart starter', () => {
     vi.unstubAllEnvs()
     cleanTmp()
   })
+
+  test('holds every file its engines name, and the file its backend URL goes in', async () => {
+    const cwd = tmp('drx-e2e-')
+    const created = await run(
+      ['init', 'site', '--yes', '--keep-engines', '--json'],
+      { cwd }
+    )
+    expect(created.code).toBe(0)
+    const site = join(cwd, 'site')
+
+    const registry = await openRegistry()
+    const { engines = [], backendUrl } = (await registry.entry('quickstart'))
+      .druxt
+    expect(engines.length).toBeGreaterThan(0)
+    for (const engine of engines) {
+      for (const file of engine.files ?? []) {
+        expect(existsSync(join(site, file)), file).toBe(true)
+      }
+      for (const step of engine.steps) {
+        if (typeof step !== 'string') {
+          expect(existsSync(join(site, step.dir)), step.dir).toBe(true)
+        }
+      }
+    }
+    expect(existsSync(join(site, backendUrl?.template ?? 'missing'))).toBe(true)
+  }, 120_000)
+
+  test('is left without the other engines when one is chosen', async () => {
+    const cwd = tmp('drx-e2e-')
+    const created = await run(
+      ['init', 'site', '--yes', '--engine', 'lando', '--json'],
+      { cwd }
+    )
+    expect(created.code).toBe(0)
+    const site = join(cwd, 'site')
+    expect(JSON.parse(created.stdout).removed).toEqual([
+      'drupal/.devtools',
+      'drupal/Makefile',
+      'drupal/.ddev/config.yaml',
+      'drupal/.ddev/docker-compose.env.yaml',
+      'drupal/.ddev/docker-compose.network-mtu.yaml',
+    ])
+    expect(existsSync(join(site, 'drupal/.lando.yml'))).toBe(true)
+    expect(
+      existsSync(join(site, 'drupal/.ddev/commands/web/drupal-install'))
+    ).toBe(true)
+    expect(readFileSync(join(site, '.env'), 'utf8')).toContain(
+      'BASE_URL=https://druxt-quickstart.lndo.site'
+    )
+  }, 120_000)
 
   test('is created by drx init and read back by drx info', async () => {
     const cwd = tmp('drx-e2e-')
