@@ -77,6 +77,14 @@ describe('loadProjectConfig', () => {
     )
   })
 
+  test('reads a file again after it has changed', async () => {
+    const root = tmp()
+    await writeProjectConfig(root, config)
+    expect((await loadProjectConfig(root)).line).toBe('0.x')
+    await writeProjectConfig(root, { ...config, line: '2.x' })
+    expect((await loadProjectConfig(root)).line).toBe('2.x')
+  })
+
   test('reads the engine, the database and the URL of a backend part', async () => {
     const root = tmp()
     const recorded: ProjectConfig = {
