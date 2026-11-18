@@ -31,6 +31,8 @@ You will need Node 22.12 or newer to run the CLI. The site it creates has its ow
 
 ## Commands
 
+An option goes before or after the name of its command, with its value as the next argument or after `=`. `drx --json module --type contrib list` is `drx module list --json --type=contrib`, and `drx --json info` is `drx info --json`. An option the command does not have is refused wherever it is.
+
 ### `drx init [dir]`
 
 Creates a site from a starter in a registry, writes `drx.config.json` at its root, and prints what the site needs and what to run next.
@@ -124,8 +126,6 @@ The Druxt version compared is the one installed in the part, or the range the pa
 | `--module-registry <url>` | A module registry: a URL, or a name from the user configuration |
 | `--refresh`               | Read the registry again even when the cached copy is fresh      |
 | `--json`                  | Print the result as JSON on stdout                              |
-
-An option of a `drx module` command goes before or after the command's name: `drx module --json list` is `drx module list --json`.
 
 ### `drx module search <text>`
 

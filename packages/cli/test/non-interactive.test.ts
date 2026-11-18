@@ -61,10 +61,22 @@ const COMMANDS: { argv: string[]; code: number; says?: string }[] = [
   { argv: ['init', 'site', '--engine', 'php', '--json'], code: 0 },
   { argv: ['info'], code: 0 },
   { argv: ['info', '--json'], code: 0 },
+  { argv: ['--json', 'info'], code: 0 },
+  { argv: ['--engine', 'none', 'init', 'site'], code: 1, says: '--base-url' },
+  { argv: ['--engine=none', 'init', 'site'], code: 1, says: '--base-url' },
+  { argv: ['--yes', 'init'], code: 0 },
   { argv: ['module'], code: 1, says: 'No command specified' },
   { argv: ['module', 'list'], code: 0 },
   { argv: ['module', '--json', 'list'], code: 0 },
   { argv: ['module', '--refresh', 'search', 'block'], code: 0 },
+  { argv: ['--json', 'module', 'list'], code: 0 },
+  { argv: ['module', '--type', 'contrib', 'list'], code: 0 },
+  { argv: ['module', '--type=contrib', 'list'], code: 0 },
+  { argv: ['--type', 'contrib', 'module', 'list'], code: 0 },
+  {
+    argv: ['module', '--category', 'site-and-layout', 'search', 'block'],
+    code: 0,
+  },
   { argv: ['module', 'search', 'block'], code: 0 },
   { argv: ['module', 'search'], code: 1, says: 'Give the text to search for' },
   { argv: ['module', 'info', 'blocks'], code: 0 },
@@ -120,9 +132,13 @@ describe.each(CONDITIONS)('with $name', (condition) => {
 })
 
 describe('an option given before the command of a group', () => {
+  let cwd: string
+  beforeEach(() => {
+    cwd = tmp('drx-cwd-')
+  })
   const unattended = (argv: string[]) =>
     run(argv, {
-      cwd: tmp('drx-cwd-'),
+      cwd,
       env: { XDG_CONFIG_HOME: tmp('drx-config-') },
       defaultModuleRegistry: `${modules.url}/modules.json`,
       now: () => new Date('2026-11-18T00:00:00Z'),
@@ -144,6 +160,42 @@ describe('an option given before the command of a group', () => {
     [
       ['module', '--json', '--refresh', 'list', '--all'],
       ['module', 'list', '--all', '--json', '--refresh'],
+    ],
+    [
+      ['module', '--type', 'contrib', '--json', 'list'],
+      ['module', 'list', '--type', 'contrib', '--json'],
+    ],
+    [
+      ['module', '--type=contrib', '--json', 'list'],
+      ['module', 'list', '--type', 'contrib', '--json'],
+    ],
+    [
+      ['module', '--category', 'site-and-layout', '--json', 'list'],
+      ['module', 'list', '--category', 'site-and-layout', '--json'],
+    ],
+    [
+      ['module', '--json', '--type', 'contrib', 'search', 'e'],
+      ['module', 'search', 'e', '--json', '--type', 'contrib'],
+    ],
+    [
+      ['--json', 'module', 'list'],
+      ['module', 'list', '--json'],
+    ],
+    [
+      ['--json', '--type', 'contrib', 'module', '--all', 'list'],
+      ['module', 'list', '--json', '--type', 'contrib', '--all'],
+    ],
+    [
+      ['--category=site-and-layout', 'module', '--json', 'list'],
+      ['module', 'list', '--category', 'site-and-layout', '--json'],
+    ],
+    [
+      ['--json', 'module', 'info', 'blocks'],
+      ['module', 'info', 'blocks', '--json'],
+    ],
+    [
+      ['--json', 'info'],
+      ['info', '--json'],
     ],
   ])('drx %j is drx %j', async (before, after) => {
     const [first, second] = [await unattended(before), await unattended(after)]
@@ -185,10 +237,96 @@ describe('an option given before the command of a group', () => {
     }
   })
 
+  test('a filter before the command leaves out what it does after it', async () => {
+    for (const form of [
+      ['module', '--type', 'contrib', 'list'],
+      ['module', '--type=contrib', 'list'],
+      ['--type', 'contrib', 'module', 'list'],
+    ]) {
+      const [before, after] = [
+        await unattended(form),
+        await unattended(['module', 'list', '--type', 'contrib']),
+      ]
+      expect(before.code, before.stderr).toBe(0)
+      expect(before.stdout).toBe(after.stdout)
+      expect(before.stdout).toContain('ckeditor')
+      expect(before.stdout).not.toContain('druxt-auth')
+    }
+  })
+
+  test('drx --module-registry <url> module list reads that registry', async () => {
+    const other = await serve({
+      '/other.json': JSON.stringify({
+        schemaVersion: 1,
+        modules: [moduleRegistry().modules[1]],
+      }),
+    })
+    try {
+      const url = `${other.url}/other.json`
+      const after = await unattended([
+        'module',
+        'list',
+        '--module-registry',
+        url,
+      ])
+      for (const form of [
+        ['--module-registry', url, 'module', 'list'],
+        [`--module-registry=${url}`, 'module', 'list'],
+      ]) {
+        const before = await unattended(form)
+        expect(before.code, before.stderr).toBe(0)
+        expect(before.stdout).toBe(after.stdout)
+        expect(before.stdout).not.toContain('druxt-auth')
+      }
+    } finally {
+      await other.close()
+    }
+  })
+
+  test('drx --json info prints the JSON that drx info --json does', async () => {
+    const [before, after] = [
+      await unattended(['--json', 'info']),
+      await unattended(['info', '--json']),
+    ]
+    expect(before.code, before.stderr).toBe(0)
+    expect(JSON.parse(before.stdout)).toEqual(JSON.parse(after.stdout))
+    expect(before.stderr).toBe(after.stderr)
+  })
+
+  test('an option before init is the option after it', async () => {
+    const created = await run(
+      ['--json', '--yes', '--registry', starters.url, 'init', 'site'],
+      { cwd, env: { XDG_CONFIG_HOME: tmp('drx-config-') } }
+    )
+    expect(created.code, created.stderr).toBe(0)
+    expect(JSON.parse(created.stdout)).toMatchObject({ ok: true })
+    expect(existsSync(join(cwd, 'site', 'drx.config.json'))).toBe(true)
+  })
+
   test('an option the command does not have is refused, wherever it is', async () => {
-    const result = await unattended(['module', '--bogus', 'list'])
-    expect(result.code).toBe(1)
-    expect(result.stderr).toContain('Unknown option --bogus')
+    for (const form of [
+      ['module', '--bogus', 'list'],
+      ['--bogus', 'module', 'list'],
+      ['--bogus', 'info'],
+      ['--type=contrib', 'info'],
+    ]) {
+      const result = await unattended(form)
+      const option = form.find((argument) => argument.startsWith('-')) ?? ''
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain(`Unknown option ${option.split('=')[0]}`)
+    }
+  })
+
+  test('--help with an option and its value before the command is that command', async () => {
+    const result = await unattended([
+      'module',
+      '--type',
+      'contrib',
+      'list',
+      '--help',
+    ])
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain('USAGE drx module list')
   })
 
   test('a failure with --json before the command is still JSON', async () => {

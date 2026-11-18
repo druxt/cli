@@ -15,7 +15,8 @@ import { DrxError } from './errors.js'
 import { createOutput } from './output.js'
 import { cliVersion } from './package-root.js'
 
-function mainCommand(context: CliContext): CommandDef {
+/** `drx` and every command under it. */
+export function mainCommand(context: CliContext): CommandDef {
   return defineCommand<ArgsDef>({
     meta: {
       name: 'drx',
@@ -62,7 +63,9 @@ async function usage(
   let command = main
   let parent: CommandDef | undefined
   let path = 'drx'
-  for (const name of argv.filter((argument) => !argument.startsWith('-'))) {
+  // With the options after the command, a value is never taken for a name.
+  const names = optionsAfterCommand(main, argv)
+  for (const name of names.filter((argument) => !argument.startsWith('-'))) {
     const next = (
       command.subCommands as Record<string, CommandDef> | undefined
     )?.[name]
@@ -89,40 +92,89 @@ function takesValue(option: string, args: ArgsDef): boolean {
   })
 }
 
+const argsOf = (command: CommandDef) => (command.args ?? {}) as ArgsDef
+
+/** Every command under one, each with the names that lead to it. */
+function commandPaths(
+  command: CommandDef,
+  path: string[] = []
+): { path: string[]; command: CommandDef }[] {
+  const below = (command.subCommands ?? {}) as Record<string, CommandDef>
+  return [
+    ...(path.length > 0 ? [{ path, command }] : []),
+    ...Object.entries(below).flatMap(([name, next]) =>
+      commandPaths(next, [...path, name])
+    ),
+  ]
+}
+
 /**
- * The arguments with an option of a group moved to after the command it was
- * given before, so `module --json list` reads as `module list --json`. citty
- * hands a command only what follows its name, and an option between a group
- * and its command would be dropped without a word. The command then takes
- * the option or refuses it, as it does one given after its name. The options
- * of `drx` itself stay where they are.
+ * Where the names that lead to a command are in the arguments, when nothing
+ * but options comes before each. An option is read as the command itself
+ * defines it, so the argument after one that takes a value is its value and
+ * never a name. Undefined when the arguments do not name the command.
  */
-function optionsAfterCommand(main: CommandDef, argv: string[]): string[] {
-  const head: string[] = []
-  let rest = argv
-  for (let command = main; ;) {
-    const subCommands = command.subCommands as
-      Record<string, CommandDef> | undefined
-    if (!subCommands) break
-    const args = (command.args ?? {}) as ArgsDef
-    let index = 0
-    while (rest[index]?.startsWith('-') && rest[index] !== '--') {
-      index += takesValue(rest[index] as string, args) ? 2 : 1
+function namesAt(
+  argv: string[],
+  path: string[],
+  args: ArgsDef
+): number[] | undefined {
+  const found: number[] = []
+  let index = 0
+  for (const name of path) {
+    while (argv[index]?.startsWith('-') && argv[index] !== '--') {
+      index += takesValue(argv[index] as string, args) ? 2 : 1
     }
-    const name = rest[index]
-    const next = name === undefined ? undefined : subCommands[name]
-    if (name === undefined || !next) break
-    const options = rest.slice(0, index)
-    if (command === main) {
-      head.push(...options, name)
-      rest = rest.slice(index + 1)
-    } else {
-      head.push(name)
-      rest = [...options, ...rest.slice(index + 1)]
-    }
-    command = next
+    if (argv[index] !== name) return undefined
+    found.push(index)
+    index += 1
   }
-  return [...head, ...rest]
+  return found
+}
+
+/**
+ * The arguments with every option moved to after the command it was given
+ * before, so `--json module --type contrib list` reads as
+ * `module list --json --type contrib`. citty hands a command only what
+ * follows its name, and an option before it would be dropped without a
+ * word, or its value taken for the name of a command. The command then
+ * takes the option or refuses it, as it does one given after its name. The
+ * options of `drx` itself stay where they are.
+ */
+export function optionsAfterCommand(
+  main: CommandDef,
+  argv: string[]
+): string[] {
+  // The longest run of names the arguments start with is the command. Of
+  // two as long, it is the one that takes more of what comes first as the
+  // values of its own options.
+  let names: number[] = []
+  for (const { path, command } of commandPaths(main)) {
+    const found = namesAt(argv, path, argsOf(command))
+    if (!found || found.length < names.length) continue
+    const later = (found.at(-1) as number) > (names.at(-1) ?? -1)
+    if (found.length > names.length || later) names = found
+  }
+  const last = names.at(-1)
+  if (last === undefined) return argv
+
+  const own = new Set(
+    Object.entries(argsOf(main)).flatMap(([name, definition]) =>
+      definition.type === 'boolean' ? [`--${name}`, `--no-${name}`] : []
+    )
+  )
+  const kept: string[] = []
+  const moved: string[] = []
+  for (const [index, argument] of argv.slice(0, last).entries()) {
+    if (names.includes(index)) continue
+    ;(own.has(argument) ? kept : moved).push(argument)
+  }
+  return [
+    ...kept,
+    ...names.map((index) => argv[index] as string),
+    ...moved,
+    ...argv.slice(last + 1),
+  ]
 }
 
 /** The code and message to report for anything a command throws. */
