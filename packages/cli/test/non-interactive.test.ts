@@ -63,6 +63,8 @@ const COMMANDS: { argv: string[]; code: number; says?: string }[] = [
   { argv: ['info', '--json'], code: 0 },
   { argv: ['module'], code: 1, says: 'No command specified' },
   { argv: ['module', 'list'], code: 0 },
+  { argv: ['module', '--json', 'list'], code: 0 },
+  { argv: ['module', '--refresh', 'search', 'block'], code: 0 },
   { argv: ['module', 'search', 'block'], code: 0 },
   { argv: ['module', 'search'], code: 1, says: 'Give the text to search for' },
   { argv: ['module', 'info', 'blocks'], code: 0 },
@@ -126,6 +128,88 @@ describe.each(CONDITIONS)('with $name', (condition) => {
       }
     }
   )
+})
+
+describe('an option given before the command of a group', () => {
+  const unattended = (argv: string[]) =>
+    run(argv, {
+      cwd: tmp('drx-cwd-'),
+      env: { XDG_CONFIG_HOME: tmp('drx-config-') },
+      defaultModuleRegistry: `${modules.url}/modules.json`,
+      now: () => new Date('2026-11-18T00:00:00Z'),
+    })
+
+  test.each([
+    [
+      ['module', '--json', 'list'],
+      ['module', 'list', '--json'],
+    ],
+    [
+      ['module', '--json', 'search', 'block'],
+      ['module', 'search', 'block', '--json'],
+    ],
+    [
+      ['module', '--json', 'info', 'blocks'],
+      ['module', 'info', 'blocks', '--json'],
+    ],
+    [
+      ['module', '--json', '--refresh', 'list', '--all'],
+      ['module', 'list', '--all', '--json', '--refresh'],
+    ],
+  ])('drx %j is drx %j', async (before, after) => {
+    const [first, second] = [await unattended(before), await unattended(after)]
+    expect(first.code, first.stderr).toBe(0)
+    expect(JSON.parse(first.stdout)).toEqual(JSON.parse(second.stdout))
+    expect(first.stdout).toBe(second.stdout)
+  })
+
+  test('drx module --module-registry <url> list reads that registry', async () => {
+    const other = await serve({
+      '/other.json': JSON.stringify({
+        schemaVersion: 1,
+        modules: [moduleRegistry().modules[1]],
+      }),
+    })
+    try {
+      const url = `${other.url}/other.json`
+      for (const form of [
+        ['module', '--module-registry', url, 'list'],
+        ['module', `--module-registry=${url}`, 'list'],
+        ['module', '--module-registry', url, '--json', 'list'],
+      ]) {
+        const before = await unattended(form)
+        const after = await unattended([
+          'module',
+          'list',
+          '--module-registry',
+          url,
+          ...(form.includes('--json') ? ['--json'] : []),
+        ])
+        expect(before.code, before.stderr).toBe(0)
+        expect(before.stdout).toBe(after.stdout)
+        expect(before.stdout).toContain('blocks')
+        expect(before.stdout).not.toContain('druxt-auth')
+        expect(before.stderr).toContain(url)
+      }
+    } finally {
+      await other.close()
+    }
+  })
+
+  test('an option the command does not have is refused, wherever it is', async () => {
+    const result = await unattended(['module', '--bogus', 'list'])
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain('Unknown option --bogus')
+  })
+
+  test('a failure with --json before the command is still JSON', async () => {
+    const result = await unattended(['module', '--json', 'info', 'nothing'])
+    expect(result.code).toBe(1)
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false,
+      error: { code: 'unknown-module' },
+    })
+  })
 })
 
 describe('drx init with no directory says why it did not ask', () => {

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { Choice, CliContext, Prompter } from '../../src/context.js'
@@ -9,7 +9,7 @@ import {
   STARTER_FILES,
   type FixtureRegistry,
 } from '../helpers/starter.js'
-import { cleanTmp, tmp } from '../helpers/tmp.js'
+import { cleanTmp, tmp, writeTree } from '../helpers/tmp.js'
 
 const FILES = {
   ...STARTER_FILES,
@@ -283,6 +283,70 @@ describe('drx init --database', () => {
       path: 'drupal',
       engine: 'lando',
     })
+  })
+})
+
+describe('drx init --engine --force, into a directory that holds files', () => {
+  const LEFT =
+    'was not empty, so the files of the engines not chosen were left in place: drupal/.devtools, drupal/Makefile, drupal/.lando.yml. --force writes the files of the starter and deletes nothing.'
+
+  test('removes no engine file, and says so', async () => {
+    writeTree(cwd, {
+      'site/drupal/.lando.yml': 'name: mine\n',
+      'site/drupal/.devtools/mine.sh': '#!/bin/sh\n',
+      'site/notes.txt': 'keep me',
+    })
+    const result = await init(['--yes', '--engine', 'ddev', '--force'])
+    expect(result.code).toBe(0)
+    expect(readFileSync(site('drupal/.devtools/mine.sh'), 'utf8')).toBe(
+      '#!/bin/sh\n'
+    )
+    expect(has('drupal/.lando.yml')).toBe(true)
+    expect(has('drupal/Makefile')).toBe(true)
+    expect(has('drupal/.ddev/config.yaml')).toBe(true)
+    expect(readFileSync(site('notes.txt'), 'utf8')).toBe('keep me')
+    expect(result.stderr).toContain(`Warning: ${site()} ${LEFT}`)
+    expect(result.stderr).not.toContain('Removed the files')
+    expect(backend().engine).toBe('ddev')
+  })
+
+  test('reports nothing removed in the JSON', async () => {
+    writeTree(cwd, { 'site/drupal/.lando.yml': 'name: mine\n' })
+    const result = await init([
+      '--yes',
+      '--engine',
+      'none',
+      '--base-url',
+      'https://example.com',
+      '--force',
+      '--json',
+    ])
+    expect(result.code).toBe(0)
+    expect(JSON.parse(result.stdout).removed).toEqual([])
+    expect(has('drupal/.lando.yml')).toBe(true)
+    expect(has('drupal/.ddev/config.yaml')).toBe(true)
+  })
+
+  test('still removes them from a directory that exists and is empty', async () => {
+    writeTree(cwd, { 'site/.keep': '' })
+    rmSync(site('.keep'))
+    const result = await init(['--yes', '--engine', 'ddev', '--force'])
+    expect(result.code).toBe(0)
+    expect(has('drupal/.lando.yml')).toBe(false)
+    expect(result.stderr).toContain('Removed the files of the engines')
+  })
+
+  test('says nothing with --keep-engines, which removes nothing anyway', async () => {
+    writeTree(cwd, { 'site/notes.txt': 'keep me' })
+    const result = await init([
+      '--yes',
+      '--engine',
+      'ddev',
+      '--force',
+      '--keep-engines',
+    ])
+    expect(result.code).toBe(0)
+    expect(result.stderr).not.toContain('left in place')
   })
 })
 

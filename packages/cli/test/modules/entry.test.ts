@@ -4,6 +4,9 @@ import { parseModuleRegistry } from '../../src/modules/entry.js'
 import { moduleRegistry, moduleRegistryWith } from '../helpers/modules.js'
 
 const AT = 'https://example.com/modules.json'
+const NPM_NAME = 'modules[1].npm must be the name of an npm package'
+const MODULE_NAME =
+  'modules[1].drupal[0].name must be a machine name: lower-case letters, digits and underscores, starting with a letter'
 
 describe('parseModuleRegistry', () => {
   test('reads an entry, keeping what the CLI uses', () => {
@@ -48,6 +51,31 @@ describe('parseModuleRegistry', () => {
       { kind: 'drupal', name: 'two', label: 'Two' },
     ])
   })
+
+  test.each([
+    'druxt',
+    'druxt-blocks',
+    '@druxt-contrib/node-preview',
+    '@druxt/core',
+    'druxt.js',
+    'druxt_blocks',
+    '',
+  ])('takes %j as the name of a package', (npm) => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.npm = npm
+    })
+    expect(parseModuleRegistry(registry, AT)[1]?.npm).toBe(npm)
+  })
+
+  test.each(['block', 'jsonapi_menu_items', 'ckeditor5', 'a'])(
+    'takes %j as the name of a backend module',
+    (name) => {
+      const registry = moduleRegistryWith(1, (module) => {
+        module.drupal = [{ name, label: 'Block' }]
+      })
+      expect(parseModuleRegistry(registry, AT)[1]?.backend[0]?.name).toBe(name)
+    }
+  )
 
   test('fills in what an entry leaves out', () => {
     const modules = parseModuleRegistry(moduleRegistry(), AT)
@@ -131,6 +159,20 @@ describe('parseModuleRegistry', () => {
       [{ name: 'block', label: 'Block', url: 7 }],
       'modules[1].drupal[0].url must be a string',
     ],
+    ['npm', '--registry=https://example.com', NPM_NAME],
+    ['npm', '-g', NPM_NAME],
+    ['npm', 'druxt-blocks & calc', NPM_NAME],
+    ['npm', 'Druxt-Blocks', NPM_NAME],
+    ['npm', '../druxt-blocks', NPM_NAME],
+    ['npm', '@druxt/', NPM_NAME],
+    ['npm', 'druxt-blocks@latest', NPM_NAME],
+    ['npm', 'a'.repeat(215), NPM_NAME],
+    ['drupal', [{ name: '--uri=example.com', label: 'Block' }], MODULE_NAME],
+    ['drupal', [{ name: 'block,node', label: 'Block' }], MODULE_NAME],
+    ['drupal', [{ name: 'block node', label: 'Block' }], MODULE_NAME],
+    ['drupal', [{ name: 'Block', label: 'Block' }], MODULE_NAME],
+    ['drupal', [{ name: '9lives', label: 'Block' }], MODULE_NAME],
+    ['drupal', [{ name: 'block|calc', label: 'Block' }], MODULE_NAME],
   ])('names the bad field: %s = %j', (field, value, message) => {
     const registry = moduleRegistryWith(1, (module) => {
       if (value === undefined) delete module[field]

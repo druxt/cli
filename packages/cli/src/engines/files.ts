@@ -41,11 +41,15 @@ function assertInsideSite(root: string, path: string): void {
  *
  * Every path is checked before anything is removed, so a bad one removes
  * nothing. A link is removed as a link, never followed.
+ *
+ * With `leave`, nothing is removed and the paths that would have been are
+ * returned: for a site whose files were not all put there by the starter.
  */
 export async function removeEngineFiles(
   root: string,
   remove: string[],
-  keep: string[]
+  keep: string[],
+  leave = false
 ): Promise<string[]> {
   for (const path of remove) assertInsideSite(root, path)
 
@@ -66,7 +70,7 @@ export async function removeEngineFiles(
       }
       return
     }
-    await rm(file, { recursive: true, force: true })
+    if (!leave) await rm(file, { recursive: true, force: true })
     removed.push(path)
   }
   for (const path of remove) await visit(normalise(path))

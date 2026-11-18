@@ -106,6 +106,17 @@ describe('a guided drx init', () => {
     expect(existsSync(join(cwd, 'guided', 'drx.config.json'))).toBe(true)
   })
 
+  test('says the engine files stay when the directory holds files', async () => {
+    writeTree(cwd, { 'guided/drupal/.lando.yml': 'name: mine\n' })
+    const result = await guided(['--force'])
+    expect(result.code).toBe(0)
+    expect(result.stderr).toContain(
+      '  Keep     the files of every engine: the directory is not empty\n'
+    )
+    expect(result.stderr).not.toContain('Remove   the files')
+    expect(existsSync(join(cwd, 'guided', 'drupal', '.lando.yml'))).toBe(true)
+  })
+
   test('starts with the wordmark', async () => {
     const result = await guided([])
     expect(result.stderr.startsWith(`\n${WORDMARK}\n`)).toBe(true)
