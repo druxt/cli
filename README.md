@@ -55,7 +55,7 @@ npx @druxt/cli init my-site --yes --json
 
 With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither.
 
-`--install` runs the install of the package manager the starter declares. For the `quickstart` starter that is `npm install`, which also sets up the Drupal backend when PHP and Composer are present.
+`--install` runs the install of the package manager the starter declares. For the `quickstart` starter that is `npm install`, which also sets up the Drupal backend when PHP and Composer are present. The steps printed under "Next" then leave out what the install ran, so nothing is set up twice.
 
 ### `drx info`
 
@@ -166,7 +166,11 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
     },
     "maintained": "2026-11-15",
     "default": true,
-    "steps": ["npm run setup", "npm run dev"]
+    "steps": ["npm run setup", "npm run dev"],
+    "install": {
+      "runs": ["npm run setup"],
+      "notes": ["npm run dev starts the backend again when it is not running."]
+    }
   }
 }
 ```
@@ -184,6 +188,8 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 | `maintained`        | The date the starter was last checked to work, as `YYYY-MM-DD`             |
 | `default`           | `true` for the starter `init` uses when none is named                      |
 | `steps`             | Optional. The commands to run in the new site, in order                    |
+| `install.runs`      | Optional. The steps the install runs itself, left out of "Next" after one  |
+| `install.notes`     | Optional. Lines printed under "Note" after an install                      |
 
 `index.json` is `{ "starters": ["quickstart"] }`.
 

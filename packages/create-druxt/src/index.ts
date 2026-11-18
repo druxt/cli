@@ -12,7 +12,8 @@ export function initArguments(argv: string[]): string[] {
  */
 export async function createDruxt(
   argv: string[],
-  run: (argv: string[]) => Promise<number> = runCli
+  run: (argv: string[]) => Promise<number> = (initArgv) =>
+    runCli(initArgv, { startedAs: { command: 'init', name: 'create-druxt' } })
 ): Promise<number> {
   return run(initArguments(argv))
 }

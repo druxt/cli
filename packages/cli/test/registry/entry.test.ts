@@ -145,6 +145,17 @@ describe('validateEntry', () => {
     ],
     ['druxt.default', 'yes', 'druxt.default must be true or false'],
     ['druxt.steps', 'npm run dev', 'druxt.steps must be an array of strings'],
+    ['druxt.install', 'npm install', 'druxt.install must be an object'],
+    [
+      'druxt.install',
+      { runs: 'npm run setup' },
+      'druxt.install.runs must be an array of strings',
+    ],
+    [
+      'druxt.install',
+      { notes: [1] },
+      'druxt.install.notes must be an array of strings',
+    ],
   ])('names the bad field: %s = %j', (path, value, message) => {
     const attempt = () => validateEntry(entryWith(path, value), 'quickstart')
     expect(attempt).toThrow(DrxError)

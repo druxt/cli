@@ -27,11 +27,21 @@ function plain(stream: TextStream, text: string): string {
   return stream.isTTY ? text : stripVTControlCharacters(text)
 }
 
+/** The meta of a command, which citty lets be a value, a promise or a function. */
+async function resolveMeta(command: CommandDef) {
+  const { meta } = command
+  return typeof meta === 'function' ? await meta() : await meta
+}
+
 /**
  * The usage of the command the arguments name, or of `drx` itself. A command
  * may hold commands of its own, so the names are followed as far as they go.
  */
-async function usage(main: CommandDef, argv: string[]): Promise<string> {
+async function usage(
+  main: CommandDef,
+  argv: string[],
+  startedAs: CliContext['startedAs']
+): Promise<string> {
   let command = main
   let parent: CommandDef | undefined
   let path = 'drx'
@@ -43,6 +53,10 @@ async function usage(main: CommandDef, argv: string[]): Promise<string> {
     parent = { meta: { name: path } }
     path = `${path} ${name}`
     command = next
+  }
+  if (startedAs && path === `drx ${startedAs.command}`) {
+    const meta = { ...(await resolveMeta(command)), name: startedAs.name }
+    return renderUsage({ ...command, meta })
   }
   return renderUsage(command, parent)
 }
@@ -81,7 +95,9 @@ export async function runCli(
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
-      stdout.write(`${plain(stdout, await usage(main, argv))}\n`)
+      stdout.write(
+        `${plain(stdout, await usage(main, argv, context.startedAs))}\n`
+      )
       return 0
     }
     if (argv.length === 1 && ['--version', '-v'].includes(argv[0] ?? '')) {
