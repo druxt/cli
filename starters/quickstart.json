@@ -75,7 +75,7 @@
       "runs": ["npm run setup"],
       "notes": [
         "npm install ran the setup. If it said it could not, run npm run setup once what it named is in place.",
-        "npm run dev starts the backend again when it is not running."
+        "With the php engine, npm run dev starts the backend again when it is not running. A DDEV, Lando or existing backend is started where it runs."
       ]
     }
   }

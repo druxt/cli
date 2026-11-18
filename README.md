@@ -250,7 +250,7 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 | `steps`             | Optional. The commands to run in the new site, in order, when no engine is chosen and for the `none` engine         |
 | `engines`           | Optional. The ways the backend can be run, described below                                                          |
 | `backendUrl`        | Optional. The `file` and `variable` the starter reads its backend URL from, and a `template` to start the file from |
-| `install.runs`      | Optional. The steps the install runs itself, left out of "Next" after one                                           |
+| `install.runs`      | Optional. The steps the install runs itself, left out of "Next" after one, from an engine's steps too               |
 | `install.notes`     | Optional. Lines printed under "Note" after an install                                                               |
 
 `index.json` is `{ "starters": ["quickstart"] }`.

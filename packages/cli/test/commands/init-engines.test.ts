@@ -168,6 +168,29 @@ describe('drx init --engine', () => {
     )
   })
 
+  test('after --install leaves the steps the install ran out of the engine steps', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      druxt.install = { runs: ['npm run setup'], notes: ['After install.'] }
+    })
+    const result = await init(
+      ['--yes', '--engine', 'ddev', '--install', '--json'],
+      { install: async () => {} }
+    )
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      next: [
+        'cd site',
+        'cd drupal',
+        'ddev start',
+        'ddev drupal-install',
+        'cd ..',
+        'npm run dev',
+      ],
+      // The engine's notes come first, then the install's.
+      notes: ['Copy the printed OAUTH_CLIENT_ID into .env.', 'After install.'],
+    })
+  })
+
   test('--json has the engine, the database and what was removed', async () => {
     const result = await init(['--yes', '--engine', 'ddev', '--json'])
     expect(JSON.parse(result.stdout)).toMatchObject({
