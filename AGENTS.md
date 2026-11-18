@@ -37,8 +37,10 @@ The Druxt command-line tool: `@druxt/cli`, with the binary `drx`, and `create-dr
 - **A change a user of a package would notice carries a changeset**
   (`npm run changeset`). Do not write a package's `CHANGELOG.md` by hand: the
   release writes it from `.changeset/`, through `.changeset/changelog.cjs`.
-- **Nothing here publishes to npm.** There is no publish job in either
-  pipeline. Do not add one that would run without a token.
+- **Only `.github/workflows/release.yml` publishes to npm,** and only once the
+  setup in `RELEASING.md` is done. Its publish jobs check out nothing and hold
+  no token. Do not add a publish step anywhere else, or one that runs
+  repository code.
 
 ## Layout
 

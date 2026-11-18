@@ -74,6 +74,12 @@ edit those files by hand. The first line of a changeset becomes the entry:
 
 The rest of the changeset follows as a paragraph of its own.
 
+## Releases
+
+Releases are cut from `0.x` by `.github/workflows/release.yml`. Merging the
+pull request it keeps open, titled `chore(release): version packages`, is the
+release. `RELEASING.md` has the whole process and its one-time setup.
+
 ## Commit messages
 
 [Conventional Commits](https://www.conventionalcommits.org). The commit-msg
