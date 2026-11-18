@@ -40,15 +40,22 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
 fi
 
 # Tool names that must not appear as an author, co-author or generator.
-tools='claude|anthropic|copilot|chatgpt|openai|gemini|codex|cursor|aider|devin|windsurf|opencode|glm'
+tools='claude|anthropic|copilot|chatgpt|openai|gemini|codex|cursor|aider|devin|windsurf|opencode|glm|\bamp\b'
 
-# Each alternative in pieces: the trailer key, the footer, the session link
-# and the noreply address are the four shapes seen in practice.
-trailer='co-authored'"-by:.*(${tools})"
+# Each alternative in pieces: the trailer keys, the footer, the session link
+# and the noreply address are the shapes seen in practice.
+trailer='(co-authored|assisted)'"-by:.*(${tools})"
 footer="generated (with|by).*(${tools}|\\bai\\b)"
 session='claude-'"session:|claude\\.ai/code/session"
 address='noreply'"@anthropic\\.com"
 pattern="(${trailer})|(${footer})|(${session})|(${address})"
+
+# grep exits 1 when nothing matches and above 1 when it could not run. Only
+# the first is a clean result: a scan that failed has read nothing.
+scan_failed() {
+  echo "[ERROR] the scan of $1 could not run (exit $2); nothing was checked." >&2
+  exit 2
+}
 
 failures=0
 report() {
@@ -85,9 +92,12 @@ if [ "$files_only" -eq 0 ]; then
   for sha in $shas; do
     commits_checked=$((commits_checked + 1))
     short="$(git rev-parse --short "$sha")"
+    hits="$(git log -1 --format=%B "$sha" | grep -iE "$pattern")"
+    rc=$?
+    [ "$rc" -gt 1 ] && scan_failed "commit ${short}" "$rc"
     while IFS= read -r line; do
       [ -n "$line" ] && report "commit ${short}: ${line}"
-    done < <(git log -1 --format=%B "$sha" | grep -iE "$pattern" || true)
+    done <<< "$hits"
   done
 fi
 
@@ -130,18 +140,24 @@ if [ "$files_only" -eq 0 ]; then
 
   if [ "$have_description" -eq 1 ]; then
     description_checked=1
+    hits="$(printf '%s\n' "$description" | grep -iE "$pattern")"
+    rc=$?
+    [ "$rc" -gt 1 ] && scan_failed "the merge request description" "$rc"
     while IFS= read -r line; do
       [ -n "$line" ] && report "merge request description: ${line}"
-    done < <(printf '%s\n' "$description" | grep -iE "$pattern" || true)
+    done <<< "$hits"
   fi
 fi
 
 # --- tracked files -----------------------------------------------------------
 
 files_checked="$(git ls-files | wc -l | tr -d ' ')"
+hits="$(git grep -nIiE "$pattern" -- .)"
+rc=$?
+[ "$rc" -gt 1 ] && scan_failed "the tracked files" "$rc"
 while IFS= read -r line; do
   [ -n "$line" ] && report "$line"
-done < <(git grep -nIiE "$pattern" -- . || true)
+done <<< "$hits"
 
 # --- verdict -----------------------------------------------------------------
 

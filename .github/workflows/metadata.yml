@@ -1,0 +1,73 @@
+---
+name: Metadata
+
+# What a check has to read from the pull request itself, not from its commits
+# or its files: the title a squash merge keeps as the commit subject, and the
+# description, which must credit no AI tool and is prose like any other.
+#
+# It is separate from ci.yml because it needs the edited activity type, and
+# ci.yml must not have it. ci.yml cancels in progress, so an edit that arrived
+# while its jobs ran would cancel them, and every bot that touches a
+# description would start the whole set again on a commit that had passed.
+#
+# synchronize is in the list although a push changes neither field: a required
+# check has to exist on the head commit.
+
+on:
+  # No branch filter, as in ci.yml.
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+# One run per pull request. An edit that arrives while a run is going replaces
+# it, because the fields that run read are no longer the ones on the pull
+# request.
+concurrency:
+  group: metadata-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          persist-credentials: false
+          # The attribution and prose checks read the pull request's own
+          # commits, so its base has to be present.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: corepack enable && corepack prepare --activate
+
+      - run: npm ci
+
+      # Through the environment, never written into the script: a title is
+      # whatever its author typed.
+      - name: Lint the title a squash merge would keep
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | npm run --silent lint:commit
+
+      # Here as well as in ci.yml, because only this workflow sees the
+      # description change.
+      - name: Check for AI attribution
+        env:
+          ATTRIBUTION_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_REQUEST_DESCRIPTION: ${{ github.event.pull_request.body }}
+        run: bash .gitlab/scripts/check-attribution.sh
+
+      - name: Lint prose
+        env:
+          PROSE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_REQUEST_DESCRIPTION: ${{ github.event.pull_request.body }}
+          PROSE_LINT_GLOB: "!.changeset/README.md"
+        run: |
+          bash .gitlab/scripts/install-vale.sh .vale/bin .vale/styles
+          bash .gitlab/scripts/lint-prose.sh
