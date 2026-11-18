@@ -77,6 +77,52 @@ describe('loadProjectConfig', () => {
     )
   })
 
+  test('reads a file again after it has changed', async () => {
+    const root = tmp()
+    await writeProjectConfig(root, config)
+    expect((await loadProjectConfig(root)).line).toBe('0.x')
+    await writeProjectConfig(root, { ...config, line: '2.x' })
+    expect((await loadProjectConfig(root)).line).toBe('2.x')
+  })
+
+  test('reads the engine, the database and the URL of a backend part', async () => {
+    const root = tmp()
+    const recorded: ProjectConfig = {
+      ...config,
+      parts: [
+        config.parts[0]!,
+        {
+          ...config.parts[1]!,
+          engine: 'none',
+          database: 'mariadb',
+          baseUrl: 'https://example.com',
+        },
+      ],
+    }
+    await writeProjectConfig(root, recorded)
+    expect(await loadProjectConfig(root)).toEqual(recorded)
+  })
+
+  test.each([
+    [{ engine: '' }, 'parts[1].engine must be a non-empty string'],
+    [{ database: 7 }, 'parts[1].database must be a non-empty string'],
+    [
+      { baseUrl: 'example.com' },
+      'parts[1].baseUrl must be an http or https URL',
+    ],
+  ])('names the bad field of a part in %j', async (extra, message) => {
+    const root = tmp()
+    writeTree(root, {
+      'drx.config.json': {
+        ...config,
+        parts: [config.parts[0], { ...config.parts[1], ...extra }],
+      },
+    })
+    await expect(loadProjectConfig(root)).rejects.toThrow(
+      `${join(root, 'drx.config.json')} is invalid: ${message}.`
+    )
+  })
+
   test('fails on a file that is not JSON', async () => {
     const root = tmp()
     writeTree(root, { 'drx.config.json': '{ nope' })

@@ -47,23 +47,39 @@ async function reportPart(root: string, part: Part): Promise<PartReport> {
 }
 
 function partLines(part: PartReport): string[] {
-  const heading = `${part.role}  ${part.kind}  ${part.path}/`
+  const heading = [
+    `${part.role}  ${part.kind}  ${part.path}/`,
+    ...columns(
+      [
+        ...(part.engine ? [['Engine', part.engine]] : []),
+        ...(part.database ? [['Database', part.database]] : []),
+        ...(part.baseUrl ? [['Backend URL', part.baseUrl]] : []),
+      ],
+      '  '
+    ),
+  ]
   if (!adapterFor(part.kind)) {
-    return [heading, `  This version has no adapter for the ${part.kind} kind.`]
+    return [
+      ...heading,
+      `  This version has no adapter for the ${part.kind} kind.`,
+    ]
   }
-  if (!part.exists) return [heading, '  The directory does not exist.']
+  if (!part.exists) return [...heading, '  The directory does not exist.']
   if (!part.detected) {
-    return [heading, `  The directory does not look like a ${part.kind} part.`]
+    return [
+      ...heading,
+      `  The directory does not look like a ${part.kind} part.`,
+    ]
   }
   if (part.packages.length === 0) {
-    return [heading, '  No packages to report.']
+    return [...heading, '  No packages to report.']
   }
   const rows = part.packages.map((entry) => [
     entry.name,
     entry.range ?? '',
     entry.installed ? `installed ${entry.installed}` : 'not installed',
   ])
-  return [heading, ...columns(rows, '  ')]
+  return [...heading, ...columns(rows, '  ')]
 }
 
 function text(report: InfoReport, cwd: string): string {

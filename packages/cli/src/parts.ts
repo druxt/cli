@@ -1,4 +1,9 @@
-import { isNonEmptyString, isRecord } from './validate.js'
+import {
+  isHttpUrl,
+  isInsidePath,
+  isNonEmptyString,
+  isRecord,
+} from './validate.js'
 
 export const ROLES = ['frontend', 'backend'] as const
 export type Role = (typeof ROLES)[number]
@@ -13,13 +18,12 @@ export interface Part {
   kind: string
   /** Relative to the project root, with forward slashes. */
   path: string
-}
-
-/** True for a path that stays inside the directory it is resolved against. */
-function isInsidePath(value: unknown): value is string {
-  if (!isNonEmptyString(value)) return false
-  if (value.startsWith('/') || /^[a-z]:/i.test(value)) return false
-  return !value.split(/[\\/]/).includes('..')
+  /** How a backend part is run on this machine, by the name of its engine. */
+  engine?: string
+  /** The database the engine was set up with, where it offers a choice. */
+  database?: string
+  /** The URL of a backend that is not run on this machine. */
+  baseUrl?: string
 }
 
 /**
@@ -44,6 +48,14 @@ export function partsProblem(
     }
     if (!isInsidePath(part.path)) {
       return `${at}.path must be a relative path inside the project`
+    }
+    for (const key of ['engine', 'database']) {
+      if (part[key] !== undefined && !isNonEmptyString(part[key])) {
+        return `${at}.${key} must be a non-empty string`
+      }
+    }
+    if (part.baseUrl !== undefined && !isHttpUrl(part.baseUrl)) {
+      return `${at}.baseUrl must be an http or https URL`
     }
   }
   return undefined

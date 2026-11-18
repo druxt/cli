@@ -20,3 +20,15 @@ export function isHttpUrl(value: unknown): value is string {
     return false
   }
 }
+
+/**
+ * True for a relative path that names something inside the directory it is
+ * resolved against: not absolute, not the directory itself, and with no
+ * segment that climbs out.
+ */
+export function isInsidePath(value: unknown): value is string {
+  if (!isNonEmptyString(value)) return false
+  if (/^[\\/]/.test(value) || /^[a-z]:/i.test(value)) return false
+  const segments = value.split(/[\\/]/).filter((segment) => segment !== '.')
+  return segments.some(Boolean) && !segments.includes('..')
+}

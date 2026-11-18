@@ -95,7 +95,7 @@ export function checkCommands(
   }
 }
 
-/** The alternatives as a phrase: "php and composer, or ddev". */
+/** The alternatives as a phrase: "one and two, or three". */
 export function describeAlternatives(alternatives: string[][]): string {
   return alternatives
     .map((commands) =>
