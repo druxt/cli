@@ -57,11 +57,28 @@ that directory should need to change.
 
 ## Changesets
 
-A change to a published package needs a changeset:
+A change that a user of `@druxt/cli` or `create-druxt` would notice needs a
+changeset. Run `npm run changeset`, pick the packages and the bump, and write
+one or two plain sentences about the change. Commit the file it writes in
+`.changeset/` with your change.
 
-```bash
-npm run changeset
-```
+The release turns the changesets into each package's `CHANGELOG.md`, so do not
+edit those files by hand. The first line of a changeset becomes the entry:
+
+- A Conventional Commits prefix is dropped. An issue in its scope, as in
+  `fix(#12):`, is linked, and a `!` marks the entry as a breaking change.
+- A leading verb is put in the past tense, so "add" reads "Added".
+- `#12` in the sentence links the issue.
+- The commit that added the changeset is linked. A line reading
+  `Commit: <sha>` in the body names a different one.
+
+The rest of the changeset follows as a paragraph of its own.
+
+## Releases
+
+Releases are cut from `0.x` by `.github/workflows/release.yml`. Merging the
+pull request it keeps open, titled `chore(release): version packages`, is the
+release. `RELEASING.md` has the whole process and its one-time setup.
 
 ## Commit messages
 

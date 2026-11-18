@@ -4,8 +4,7 @@ name: CI
 # The same lint and test set as .gitlab-ci.yml. Nothing on this side lints this
 # file: the GitLab pipeline runs actionlint over it.
 #
-# There is no publish job. A release is cut by hand from the changesets until
-# a workflow with its own token is added on purpose.
+# There is no publish job here. release.yml cuts the releases.
 
 on:
   push:
