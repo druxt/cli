@@ -1,6 +1,6 @@
-import { kindsWithRole } from '../adapters/index.js'
+import { adapterFor, kindsWithRole } from '../adapters/index.js'
 import { DrxError } from '../errors.js'
-import { isNonEmptyString, isRecord } from '../validate.js'
+import { isNonEmptyString, isNpmName, isRecord } from '../validate.js'
 
 /** The registry format this version reads. */
 export const MODULE_SCHEMA_VERSION = 1
@@ -89,13 +89,17 @@ function backendModules(raw: Raw, at: string): BackendModule[] {
       const url = optionalString(item, 'url', here)
       // Checked for its type, and kept only when it is there.
       const core = optionalBoolean(item, 'core', here)
-      modules.push({
+      const module: BackendModule = {
         kind,
         name: requiredString(item, 'name', here),
         label: requiredString(item, 'label', here),
         ...(item.core === undefined ? {} : { core }),
         ...(url === undefined ? {} : { url }),
-      })
+      }
+      // The kind says what its tools take, so a value is never an option.
+      const problem = adapterFor(kind)?.moduleProblem?.(module)
+      if (problem) throw new Invalid(`${here}.${problem.field} ${problem.must}`)
+      modules.push(module)
     }
   }
   return modules
@@ -118,6 +122,11 @@ function moduleEntry(raw: unknown, at: string): ModuleEntry {
   const status = requiredString(raw, 'status', at)
   const type = requiredString(raw, 'type', at)
   const npm = optionalString(raw, 'npm', at)
+  // An empty name is a module with no package. Any other is an argument of
+  // a package manager one day, so it has to be a name and nothing else.
+  if (npm !== undefined && npm !== '' && !isNpmName(npm)) {
+    throw new Invalid(`${at}.npm must be the name of an npm package`)
+  }
   const path = optionalString(raw, 'path', at)
   const website = optionalString(raw, 'website', at)
 

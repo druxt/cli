@@ -75,6 +75,7 @@ An engine is a way to run the site's backend on your machine. The starter lists 
 - The prompt lists the engines whose commands are installed first, and marks the others as not installed. You can still choose one of those. `init` then warns which commands are missing, and creates the site.
 - With `--yes` or no terminal, the engine is the first whose commands are all installed, or the starter's first when none is.
 - `init` removes the files of the engines you did not choose, so a DDEV site has no `.lando.yml`. `--keep-engines` leaves them all.
+- **`--force` into a project that exists.** `--force` writes the starter's files into a directory that holds files, and a file the starter also has is replaced by the starter's. It deletes nothing. The files of the engines you did not choose stay, since any of them may be your own. `init` warns with their paths. Commit or copy the project first.
 - For an engine that serves the backend at a fixed URL, and for `none`, `init` writes the URL where the starter reads it. For the quickstart that is `BASE_URL` in `.env`.
 - What the site needs and the steps to run next are the chosen engine's.
 - An engine or a database the starter does not offer fails, with the names it does offer.
@@ -370,6 +371,8 @@ The package includes a copy of the public registry. When the public registry can
 ## The module registry
 
 The module commands read `https://cdn.jsdelivr.net/gh/druxt/modules@main/modules.json`, which the [druxt/modules](https://github.com/druxt/modules) repository publishes. The CLI reads `schemaVersion` 1. It refuses any other version with a message saying so, and ignores fields it has no use for.
+
+The names in an entry become arguments of a package manager or a backend tool, so each is checked as the registry is read. A package name has to be one npm takes, and the name of a Drupal module has to be a machine name. Anything else, such as a name that starts with a hyphen, makes the registry invalid, and the message names the entry and the field.
 
 The registry is cached on disk:
 
