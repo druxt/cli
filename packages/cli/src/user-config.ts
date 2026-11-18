@@ -102,7 +102,10 @@ export async function loadUserConfig(env: Env): Promise<UserConfig> {
 
 /** Turns a `--registry` value into a URL: a URL, or a configured name. */
 export function resolveRegistryUrl(value: string, config: UserConfig): string {
-  const named = config.registries[value]
+  // An own key only: every object has a `constructor`.
+  const named = Object.hasOwn(config.registries, value)
+    ? config.registries[value]
+    : undefined
   if (named) return named
   if (isHttpUrl(value)) return value
   const names = Object.keys(config.registries).sort()

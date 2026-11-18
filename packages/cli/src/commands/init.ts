@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { defineCommand, type ArgsDef } from 'citty'
@@ -13,6 +14,7 @@ import {
 } from '../layouts.js'
 import { createOutput, type Output } from '../output.js'
 import { writeProjectConfig, type ProjectConfig } from '../project.js'
+import { shellQuote } from '../repeat.js'
 import type { StarterEntry } from '../registry/entry.js'
 import {
   defaultStarter,
@@ -275,6 +277,10 @@ async function runInit(
       providers: {
         starter: () => ({
           name: entry.name,
+          // giget keeps the archive under the name and the version, and
+          // unpacks the kept one when a fetch fails. The version is the
+          // address, so the kept archive is only ever this entry's own.
+          version: createHash('sha256').update(entry.tar).digest('hex'),
           tar: entry.tar,
           ...(entry.subdir ? { subdir: entry.subdir } : {}),
           ...(entry.headers ? { headers: entry.headers } : {}),
@@ -320,7 +326,7 @@ async function runInit(
   const fromCwd = relative(context.cwd, target)
   const inside = fromCwd !== '' && !fromCwd.startsWith('..')
   const next = [
-    `cd ${inside && !isAbsolute(fromCwd) ? fromCwd : target}`,
+    `cd ${shellQuote(inside && !isAbsolute(fromCwd) ? fromCwd : target)}`,
     ...(entry.druxt.steps ?? []),
   ]
   const { requires } = entry.druxt

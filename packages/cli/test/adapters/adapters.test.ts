@@ -68,6 +68,22 @@ describe('the nuxt adapter', () => {
     ])
   })
 
+  test('finds a package installed in a directory above, as Node does', async () => {
+    const root = tmp()
+    writeTree(root, {
+      'nuxt/package.json': {
+        dependencies: { nuxt: '^2.15.8', druxt: '^0.25.0' },
+      },
+      'node_modules/nuxt/package.json': { version: '2.15.8' },
+      'node_modules/druxt/package.json': { version: '0.25.0' },
+      'nuxt/node_modules/druxt/package.json': { version: '0.25.1' },
+    })
+    expect(await nuxt.packages(`${root}/nuxt`)).toEqual([
+      { name: 'nuxt', range: '^2.15.8', installed: '2.15.8' },
+      { name: 'druxt', range: '^0.25.0', installed: '0.25.1' },
+    ])
+  })
+
   test('reports nothing for a directory with no package.json', async () => {
     expect(await nuxt.packages(tmp())).toEqual([])
   })

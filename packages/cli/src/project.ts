@@ -1,11 +1,14 @@
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { loadConfig } from 'c12'
 import { DrxError } from './errors.js'
 import { isLayout, LAYOUTS, type Layout } from './layouts.js'
 import { partsProblem, type Part } from './parts.js'
 import { isNonEmptyString } from './validate.js'
+
+const nodeRequire = createRequire(import.meta.url)
 
 /** The file at a project's root that says how the project is laid out. */
 export const CONFIG_FILE = 'drx.config.json'
@@ -63,6 +66,12 @@ export async function loadProjectConfig(root: string): Promise<ProjectConfig> {
   const file = join(root, CONFIG_FILE)
   let config: Record<string, unknown>
   try {
+    // c12 loads a JSON file through Node's require, which keeps the first
+    // read for the life of the process. Forgetting it reads the file as it is
+    // now, which matters to anything that calls the CLI more than once.
+    for (const cached of [file, realpathSync(file)]) {
+      delete nodeRequire.cache[cached]
+    }
     // The file is read on its own: no rc file, no package.json key, no
     // environment overrides and no `extends`, so what is in it is all there is.
     const loaded = await loadConfig<Record<string, unknown>>({
