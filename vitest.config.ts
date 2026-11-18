@@ -13,6 +13,8 @@ export default defineConfig({
   },
   test: {
     include: ['packages/*/test/**/*.test.ts', 'test/**/*.test.ts'],
+    // A git hook's variables would send a test's own git commands to the repository being committed to.
+    setupFiles: ['./test/setup/git-env.ts'],
     coverage: {
       provider: 'v8',
       include: ['packages/*/src/**/*.ts', 'scripts/lint-private-refs.mjs'],
