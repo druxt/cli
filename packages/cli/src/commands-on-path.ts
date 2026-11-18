@@ -1,5 +1,5 @@
 import { accessSync, constants, statSync } from 'node:fs'
-import { extname, join } from 'node:path'
+import { extname, join, resolve } from 'node:path'
 
 type Env = Record<string, string | undefined>
 
@@ -22,6 +22,20 @@ function isRunnable(file: string, windows: boolean): boolean {
   }
 }
 
+/** A name as Windows would try it: as it is, or with each extension. */
+function spellings(name: string, env: Env, windows: boolean): string[] {
+  if (!windows || extname(name) !== '') return [name]
+  return (
+    (env.PATHEXT || DEFAULT_PATHEXT)
+      .split(';')
+      .filter(Boolean)
+      // The file system ignores case there. Trying the lower-case spelling
+      // first gives the same answer on one that does not.
+      .flatMap((extension) => [extension.toLowerCase(), extension])
+      .map((extension) => name + extension)
+  )
+}
+
 /**
  * The file a command name resolves to on PATH, or undefined. It reads the
  * directories itself and runs nothing, so no shell is involved.
@@ -42,17 +56,7 @@ export function findOnPath(
     .split(windows ? ';' : ':')
     .filter(Boolean)
 
-  let names = [name]
-  if (windows && extname(name) === '') {
-    names = (env.PATHEXT || DEFAULT_PATHEXT)
-      .split(';')
-      .filter(Boolean)
-      // The file system ignores case there. Trying the lower-case spelling
-      // first gives the same answer on one that does not.
-      .flatMap((extension) => [extension.toLowerCase(), extension])
-      .map((extension) => name + extension)
-  }
-
+  const names = spellings(name, env, windows)
   for (const directory of directories) {
     for (const candidate of names) {
       const file = join(directory, candidate)
@@ -60,6 +64,24 @@ export function findOnPath(
     }
   }
   return undefined
+}
+
+/**
+ * The file a command would start: a name is looked up on PATH, and a path
+ * is taken from the directory the command runs in. On Windows a path with
+ * no extension is tried with each extension in PATHEXT, as a name is.
+ */
+export function findCommandFile(
+  command: string,
+  cwd: string,
+  env: Env = process.env,
+  platform: string = process.platform
+): string | undefined {
+  if (!/[\\/]/.test(command)) return findOnPath(command, env, platform)
+  const windows = platform === 'win32'
+  return spellings(resolve(cwd, command), env, windows).find((file) =>
+    isRunnable(file, windows)
+  )
 }
 
 /** What a starter's commands look like on this machine. */

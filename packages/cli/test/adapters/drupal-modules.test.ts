@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'vitest'
 import { adapterFor } from '../../src/adapters/index.js'
 import type {
@@ -45,7 +47,7 @@ function answering(
       )
       return { code: 0, output: JSON.stringify(list) }
     }
-    const name = args[1] as string
+    const name = args.at(-1) as string
     if (!enabled.includes(name)) {
       return {
         code: 1,
@@ -80,32 +82,59 @@ function site(
   return dir
 }
 
+/** The site each change was planned for, to make an edit's content from. */
+const sites = new WeakMap<ModuleChange, string>()
+const planned = async (dir: string, change: Promise<ModuleChange>) => {
+  sites.set(await change, dir)
+  return change
+}
+
 const add = (
   dir: string,
   needs: BackendModule[],
   options: Partial<AddRequest> = {}
 ) =>
-  drupal.addModule(dir, {
-    needs,
-    patches: true,
-    registryStatesCore: true,
-    ask: answering().ask,
-    ...options,
-  })
+  planned(
+    dir,
+    drupal.addModule(dir, {
+      needs,
+      patches: true,
+      registryStatesCore: true,
+      ask: answering().ask,
+      ...options,
+    })
+  )
 
 const runs = (change: ModuleChange) =>
   change.steps.flatMap((step) =>
     'run' in step ? [`${step.run.tool} ${step.run.args.join(' ')}`] : []
   )
+/** The edit of a change, with the content it makes of the file as it is. */
 const edit = (change: ModuleChange) =>
-  change.steps.flatMap((step) => ('edit' in step ? [step.edit] : []))[0]
+  change.steps.flatMap((step) => {
+    if (!('edit' in step)) return []
+    const file = join(sites.get(change) as string, step.edit.file)
+    const content = step.edit.change(readFileSync(file, 'utf8'))
+    return [{ ...step.edit, content }]
+  })[0]
+/** What the part says was done, once every step has been taken. */
+const settled = (change: ModuleChange) =>
+  change.settle?.(
+    change.steps.reduce<BackendRecord>(
+      (done, step) => ({
+        modules: [...done.modules, ...(step.record?.modules ?? [])],
+        patches: [...done.patches, ...(step.record?.patches ?? [])],
+      }),
+      { modules: [], patches: [] }
+    )
+  )
 
 describe('adding the backend modules a Druxt module needs', () => {
   test('requires a contributed module and enables it', async () => {
     const change = await add(site(), [need('decoupled_router')])
     expect(runs(change)).toEqual([
-      'composer require drupal/decoupled_router',
-      'drush en -y decoupled_router',
+      'composer require -- drupal/decoupled_router',
+      'drush en -y -- decoupled_router',
     ])
     expect(change.record).toEqual({
       modules: [
@@ -123,7 +152,7 @@ describe('adding the backend modules a Druxt module needs', () => {
 
   test('only enables a core module', async () => {
     const change = await add(site(), [need('jsonapi', { core: true })])
-    expect(runs(change)).toEqual(['drush en -y jsonapi'])
+    expect(runs(change)).toEqual(['drush en -y -- jsonapi'])
     // It has no package, and the record says it was enabled.
     expect(change.record).toEqual({
       modules: [{ name: 'jsonapi', enabled: true, required: false }],
@@ -139,8 +168,8 @@ describe('adding the backend modules a Druxt module needs', () => {
       need('views', { core: true }),
     ])
     expect(runs(change)).toEqual([
-      'composer require drupal/jsonapi_menu_items:^1.2',
-      'drush en -y menu_items views',
+      'composer require -- drupal/jsonapi_menu_items:^1.2',
+      'drush en -y -- menu_items views',
     ])
     expect(change.record?.modules).toEqual([
       {
@@ -161,7 +190,7 @@ describe('adding the backend modules a Druxt module needs', () => {
       },
     })
     const change = await add(dir, [need('decoupled_router')])
-    expect(runs(change)).toEqual(['drush en -y decoupled_router'])
+    expect(runs(change)).toEqual(['drush en -y -- decoupled_router'])
     expect(change.notes).toContain(
       'drupal/decoupled_router is already required in composer.json.'
     )
@@ -185,7 +214,9 @@ describe('adding the backend modules a Druxt module needs', () => {
     expect(asked).toEqual([
       'drush pm:list --type=module --status=enabled --fields=name,path --format=json',
     ])
-    expect(runs(change)).toEqual(['composer require drupal/decoupled_router'])
+    expect(runs(change)).toEqual([
+      'composer require -- drupal/decoupled_router',
+    ])
     expect(change.notes).toEqual([
       'decoupled_router is already enabled.',
       'views is already enabled.',
@@ -209,7 +240,7 @@ describe('adding the backend modules a Druxt module needs', () => {
     ])
     // Drush enables what a module depends on with it.
     enabled.push('jsonapi_defaults', 'jsonapi_extras')
-    expect(await change.settle?.()).toEqual({
+    expect(await settled(change)).toEqual({
       modules: [
         {
           name: 'jsonapi_defaults',
@@ -227,7 +258,7 @@ describe('adding the backend modules a Druxt module needs', () => {
     const { ask } = answering([])
     const change = await add(site(), [need('decoupled_router')], { ask })
     // Nothing was enabled by the time it is asked again.
-    expect((await change.settle?.())?.modules).toEqual([
+    expect((await settled(change))?.modules).toEqual([
       {
         name: 'decoupled_router',
         package: 'drupal/decoupled_router',
@@ -241,7 +272,7 @@ describe('adding the backend modules a Druxt module needs', () => {
     const change = await add(site(), [need('views', { core: true })], {
       ask: silent,
     })
-    expect(runs(change)).toEqual(['drush en -y views'])
+    expect(runs(change)).toEqual(['drush en -y -- views'])
     expect(change.record?.modules).toEqual([])
     expect(change.warnings).toEqual([
       'The backend could not say which modules are enabled. views will be enabled, and drx remove will leave it enabled, since it may have been before.',
@@ -299,8 +330,8 @@ describe('telling a core module from a contributed one when the registry does no
       published
     )
     expect(runs(change)).toEqual([
-      'composer require drupal/decoupled_router',
-      'drush en -y jsonapi decoupled_router',
+      'composer require -- drupal/decoupled_router',
+      'drush en -y -- jsonapi decoupled_router',
     ])
   })
 
@@ -312,7 +343,7 @@ describe('telling a core module from a contributed one when the registry does no
       { 'docroot/core/modules/views/views.info.yml': 'name: Views\n' }
     )
     expect(runs(await add(dir, [need('views')], published))).toEqual([
-      'drush en -y views',
+      'drush en -y -- views',
     ])
   })
 
@@ -325,7 +356,7 @@ describe('telling a core module from a contributed one when the registry does no
     })
     const change = await add(dir, [need('decoupled_router')], published)
     expect(change.problems).toEqual([])
-    expect(runs(change)).toEqual(['drush en -y decoupled_router'])
+    expect(runs(change)).toEqual(['drush en -y -- decoupled_router'])
   })
 
   test('refuses to guess when core is not installed, and takes no step', async () => {
@@ -378,10 +409,10 @@ describe('the patches a backend module needs', () => {
     expect(change.steps.map((step) => Object.keys(step)[0])[0]).toBe('edit')
     // Neither package is installed yet: each is patched as it is installed.
     expect(runs(change)).toEqual([
-      `composer require ${PLUGIN}:^2.0@beta`,
+      `composer require -- ${PLUGIN}:^2.0@beta`,
       'composer patches-relock',
-      'composer require drupal/decoupled_router',
-      'drush en -y decoupled_router',
+      'composer require -- drupal/decoupled_router',
+      'drush en -y -- decoupled_router',
     ])
     expect(change.record?.patches).toEqual([
       {
@@ -420,11 +451,11 @@ describe('the patches a backend module needs', () => {
       }),
     ])
     expect(runs(change)).toEqual([
-      `composer require ${PLUGIN}:^2.0@beta`,
+      `composer require -- ${PLUGIN}:^2.0@beta`,
       'composer patches-relock',
-      'composer require drupal/decoupled_router',
+      'composer require -- drupal/decoupled_router',
       'composer patches-repatch',
-      'drush en -y decoupled_router',
+      'drush en -y -- decoupled_router',
     ])
   })
 
@@ -466,7 +497,9 @@ describe('the patches a backend module needs', () => {
       'A local fix': 'patches/a.patch',
     })
     expect(written.config).toBeUndefined()
-    expect(runs(change)).not.toContain(`composer require ${PLUGIN}:^2.0@beta`)
+    expect(runs(change)).not.toContain(
+      `composer require -- ${PLUGIN}:^2.0@beta`
+    )
   })
 
   test('skip one whose fix the installed package has', async () => {
@@ -522,8 +555,8 @@ describe('the patches a backend module needs', () => {
     const change = await add(site(), [patched()], { patches: false })
     expect(edit(change)).toBeUndefined()
     expect(runs(change)).toEqual([
-      'composer require drupal/decoupled_router',
-      'drush en -y decoupled_router',
+      'composer require -- drupal/decoupled_router',
+      'drush en -y -- decoupled_router',
     ])
     expect(change.warnings).toEqual([
       'The patch "Fix the redirect loop" for drupal/decoupled_router was not applied. Decoupled Router may not work without it.',
@@ -548,8 +581,8 @@ describe('a backend that is not run from here', () => {
     ])
     expect(change.problems).toEqual([])
     expect(runs(change)).toEqual([
-      'composer require drupal/jsonapi_menu_items drupal/menu_link_content',
-      'drush en -y jsonapi_menu_items menu_link_content',
+      'composer require -- drupal/jsonapi_menu_items drupal/menu_link_content',
+      'drush en -y -- jsonapi_menu_items menu_link_content',
     ])
     expect(change.manual).toEqual([
       'The module registry does not say whether jsonapi_menu_items or menu_link_content is part of core. Leave a module that is out of the composer require line: only the enable line applies to it.',
@@ -561,7 +594,7 @@ describe('a backend that is not run from here', () => {
       need('block', { core: true }),
     ])
     expect(change.problems).toEqual([])
-    expect(runs(change)).toEqual(['drush en -y block'])
+    expect(runs(change)).toEqual(['drush en -y -- block'])
   })
 })
 
@@ -607,18 +640,18 @@ describe('taking backend modules out again', () => {
       files
     )
   const remove = (dir: string, ask: Ask, given = record) =>
-    drupal.removeModule(dir, { record: given, ask })
+    planned(dir, drupal.removeModule(dir, { record: given, ask }))
 
   test('uninstalls and removes what the record says was added', async () => {
     const { ask, asked } = answering([ROUTER, MENU])
     const change = await remove(carrying(), ask)
     expect(asked).toEqual([
-      'drush pm:uninstall decoupled_router --simulate',
-      'drush pm:uninstall jsonapi_menu_items --simulate',
+      'drush pm:uninstall --simulate -- decoupled_router',
+      'drush pm:uninstall --simulate -- jsonapi_menu_items',
     ])
     expect(runs(change)).toEqual([
-      'drush pmu -y decoupled_router jsonapi_menu_items',
-      'composer remove --no-update-with-dependencies drupal/decoupled_router drupal/jsonapi_menu_items',
+      'drush pmu -y -- decoupled_router jsonapi_menu_items',
+      'composer remove --no-update-with-dependencies -- drupal/decoupled_router drupal/jsonapi_menu_items',
       'composer patches-relock',
     ])
     expect(JSON.parse(edit(change)?.content ?? '{}').extra.patches).toEqual({
@@ -632,8 +665,8 @@ describe('taking backend modules out again', () => {
     const { ask } = answering([ROUTER, MENU, 'druxt'], { [ROUTER]: ['druxt'] })
     const change = await remove(carrying(), ask)
     expect(runs(change)).toEqual([
-      'drush pmu -y jsonapi_menu_items',
-      'composer remove --no-update-with-dependencies drupal/jsonapi_menu_items',
+      'drush pmu -y -- jsonapi_menu_items',
+      'composer remove --no-update-with-dependencies -- drupal/jsonapi_menu_items',
     ])
     expect(edit(change)).toBeUndefined()
     expect(change.notes).toEqual([
@@ -649,7 +682,7 @@ describe('taking backend modules out again', () => {
     const { ask } = answering([ROUTER, MENU], { [ROUTER]: [MENU] })
     const change = await remove(carrying(), ask)
     expect(runs(change)[0]).toBe(
-      'drush pmu -y decoupled_router jsonapi_menu_items'
+      'drush pmu -y -- decoupled_router jsonapi_menu_items'
     )
   })
 
@@ -677,12 +710,12 @@ describe('taking backend modules out again', () => {
   test('does not uninstall a module that is no longer enabled, and removes its package', async () => {
     const { ask } = answering([MENU])
     const change = await remove(carrying(), ask)
-    expect(runs(change)[0]).toBe('drush pmu -y jsonapi_menu_items')
+    expect(runs(change)[0]).toBe('drush pmu -y -- jsonapi_menu_items')
     expect(change.notes).toContain(
       'decoupled_router is not enabled, so it is not uninstalled.'
     )
     expect(runs(change)[1]).toBe(
-      'composer remove --no-update-with-dependencies drupal/decoupled_router drupal/jsonapi_menu_items'
+      'composer remove --no-update-with-dependencies -- drupal/decoupled_router drupal/jsonapi_menu_items'
     )
   })
 
@@ -713,7 +746,7 @@ describe('taking backend modules out again', () => {
       const change = await remove(dir, ask, only)
       // Composer's remove fails on a package that is still installed.
       expect(runs(change)).toEqual([
-        'composer remove --no-update drupal/jsonapi_views',
+        'composer remove --no-update -- drupal/jsonapi_views',
         'composer update --lock',
       ])
       expect(asked).toEqual([])
@@ -735,7 +768,7 @@ describe('taking backend modules out again', () => {
       const { ask } = answering([])
       const change = await remove(site({}, installed({})), ask, only)
       expect(runs(change)).toEqual([
-        'composer remove --no-update-with-dependencies drupal/jsonapi_views',
+        'composer remove --no-update-with-dependencies -- drupal/jsonapi_views',
       ])
     })
   })
@@ -776,7 +809,7 @@ describe('taking backend modules out again', () => {
       }
     )
     const change = await remove(dir, ask, given)
-    expect(runs(change)).toEqual(['drush pmu -y jsonapi_defaults'])
+    expect(runs(change)).toEqual(['drush pmu -y -- jsonapi_defaults'])
     expect(change.notes).toEqual([
       'drupal/jsonapi_extras stays required: jsonapi_extras is enabled, and its files are in that package.',
     ])
@@ -803,11 +836,11 @@ describe('taking backend modules out again', () => {
     const { ask } = answering([ROUTER, MENU])
     const change = await remove(dir, ask)
     expect(runs(change)).toEqual([
-      'drush pmu -y decoupled_router jsonapi_menu_items',
-      'composer remove --no-update drupal/decoupled_router',
-      'composer remove --no-update-with-dependencies drupal/jsonapi_menu_items',
+      'drush pmu -y -- decoupled_router jsonapi_menu_items',
+      'composer remove --no-update -- drupal/decoupled_router',
+      'composer remove --no-update-with-dependencies -- drupal/jsonapi_menu_items',
       'composer patches-relock',
-      'composer reinstall drupal/decoupled_router',
+      'composer reinstall -- drupal/decoupled_router',
     ])
   })
 
@@ -837,7 +870,25 @@ describe('taking backend modules out again', () => {
       },
     })
     const change = await remove(dir, answering([ROUTER, MENU]).ask)
-    expect(JSON.parse(edit(change)?.content ?? '{}').extra).toEqual({})
+    // With the key gone `extra` is empty, and goes as well.
+    expect(JSON.parse(edit(change)?.content ?? '{}').extra).toBeUndefined()
+  })
+
+  test('keeps what else the site has under extra', async () => {
+    const dir = site({
+      extra: {
+        'drupal-scaffold': { locations: { 'web-root': 'web/' } },
+        patches: {
+          'drupal/decoupled_router': {
+            'Fix the redirect loop': 'https://example.com/mr/12.diff',
+          },
+        },
+      },
+    })
+    const change = await remove(dir, answering([ROUTER, MENU]).ask)
+    expect(JSON.parse(edit(change)?.content ?? '{}').extra).toEqual({
+      'drupal-scaffold': { locations: { 'web-root': 'web/' } },
+    })
   })
 
   test('does nothing with no record', async () => {

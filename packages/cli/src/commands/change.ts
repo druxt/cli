@@ -10,13 +10,20 @@ import {
   planData,
   planLines,
   planRemove,
+  stepLabels,
   type ChangeOptions,
   type ModulePlan,
   type Project,
 } from '../modules/change.js'
 import type { ModuleEntry } from '../modules/entry.js'
+import type { LoadedModules } from '../modules/registry.js'
 import { createOutput } from '../output.js'
-import { CONFIG_FILE, findProjectRoot, loadProjectConfig } from '../project.js'
+import {
+  CONFIG_FILE,
+  findProjectRoot,
+  loadProjectConfig,
+  type ModuleRecord,
+} from '../project.js'
 import { repeatCommand } from '../repeat.js'
 import { findModule, openModules, registryArgs } from './module.js'
 
@@ -69,20 +76,44 @@ const ARGS = {
   },
 } satisfies Record<Action, ArgsDef>
 
-/** The modules of the registry that the picker offers for an action. */
+/**
+ * A module as the project's record names it, for a remove of one the
+ * registry no longer lists or cannot be asked about. The record holds
+ * everything a remove acts on.
+ */
+const fromRecord = (record: ModuleRecord): ModuleEntry => ({
+  name: record.name,
+  npm: record.package,
+  repo: '',
+  category: '',
+  status: '',
+  type: '',
+  archived: false,
+  description: '',
+  backend: [],
+})
+
+/** The modules that the picker offers for an action. */
 function candidates(
   action: Action,
   modules: ModuleEntry[],
   project: Project
 ): ModuleEntry[] {
-  const sorted = [...modules].sort((a, b) => a.name.localeCompare(b.name))
+  const byName = (a: ModuleEntry, b: ModuleEntry) =>
+    a.name.localeCompare(b.name)
   if (action === 'add') {
-    return sorted.filter((module) => !module.archived && module.npm)
+    return modules
+      .filter((module) => !module.archived && module.npm)
+      .sort(byName)
   }
-  // What can be removed is what drx add recorded.
-  return sorted.filter((module) =>
-    project.config.modules?.some((entry) => entry.name === module.name)
-  )
+  // What can be removed is what drx add recorded, in the registry or not.
+  return (project.config.modules ?? [])
+    .map(
+      (record) =>
+        modules.find((module) => module.name === record.name) ??
+        fromRecord(record)
+    )
+    .sort(byName)
 }
 
 /**
@@ -130,23 +161,41 @@ function changeCommand(
         )
       }
 
-      const loaded = await openModules(context, flags, output)
+      // A remove undoes what the project's own record says. The registry
+      // only adds what else in the project may need a backend module, so a
+      // remove goes ahead without it.
+      let loaded: LoadedModules | undefined
+      try {
+        loaded = await openModules(context, flags, output)
+      } catch (error) {
+        const unread = error instanceof DrxError && error.code === 'registry'
+        if (action !== 'remove' || !unread) throw error
+        output.warn(
+          `${error.message} drx remove goes by the record in ${CONFIG_FILE}.`
+        )
+        if (flags.backend === true) {
+          output.warn(
+            'Without the module registry, drx remove cannot tell whether another module of the project needs what it takes out of the backend.'
+          )
+        }
+      }
+      const registry = loaded?.modules ?? []
       const options: ChangeOptions = {
         force: flags.force === true,
         patches: flags.patches !== false,
         backend: flags.backend === true,
         // A registry that marks any module as core is taken to mark them all.
-        registryStatesCore: loaded.modules.some((module) =>
+        registryStatesCore: registry.some((module) =>
           module.backend.some((need) => need.core)
         ),
-        registry: loaded.modules,
+        registry,
         names: [],
         exec: context.exec,
       }
 
       const picked = names.length === 0
       if (picked) {
-        const offered = candidates(action, loaded.modules, project)
+        const offered = candidates(action, registry, project)
         if (offered.length === 0) {
           throw new DrxError(
             'usage',
@@ -163,27 +212,45 @@ function changeCommand(
         })
       }
 
-      const modules = names.map((wanted) => findModule(loaded.modules, wanted))
-      options.names = modules.map((module) => module.name)
-      const plans: ModulePlan[] = []
-      for (const module of modules) {
-        plans.push(
-          action === 'add'
-            ? await planAdd(module, project, options)
-            : await planRemove(module, project, options)
-        )
+      /** A module by name: in the registry, or for a remove on the record. */
+      const named = (wanted: string): ModuleEntry => {
+        try {
+          return findModule(registry, wanted)
+        } catch (error) {
+          if (action !== 'remove') throw error
+          const name = wanted.toLowerCase()
+          const record = project.config.modules?.find(
+            (entry) =>
+              entry.name.toLowerCase() === name ||
+              entry.package.toLowerCase() === name
+          )
+          if (record) return fromRecord(record)
+          if (loaded) throw error
+          throw new DrxError(
+            'unknown-module',
+            `drx add recorded no module named "${wanted}" in this project.`
+          )
+        }
       }
-
-      // Every refusal is found before any step is taken, so one module that
-      // cannot be changed leaves the others as they were too.
-      const refused = plans.flatMap((plan) =>
+      const modules = names.map(named)
+      options.names = modules.map((module) => module.name)
+      const planFor = (module: ModuleEntry) =>
+        action === 'add'
+          ? planAdd(module, project, options)
+          : planRemove(module, project, options)
+      const refusalsOf = (plan: ModulePlan) =>
         plan.refusals
           .filter((refusal) => !(options.force && refusal.forceable))
           .map(
             (refusal) =>
               `Cannot ${action} ${plan.module.name}: ${refusal.reason}${refusal.forceable ? ` Pass --force to ${action} it all the same.` : ''}`
           )
-      )
+      const plans: ModulePlan[] = []
+      for (const module of modules) plans.push(await planFor(module))
+
+      // Every refusal is found before any step is taken, so one module that
+      // cannot be changed leaves the others as they were too.
+      const refused = plans.flatMap(refusalsOf)
       if (refused.length > 0) throw new DrxError('refused', refused.join('\n'))
 
       for (const plan of plans) {
@@ -196,18 +263,19 @@ function changeCommand(
         ...(index > 0 ? [''] : []),
         ...planLines(plan),
       ])
-      const data = plans.map((plan) => ({
-        name: plan.module.name,
-        package: plan.package,
-        steps: planData(plan),
-        leftToDo: leftToDo(plan),
-      }))
+      const data = () =>
+        plans.map((plan) => ({
+          name: plan.module.name,
+          package: plan.package,
+          steps: planData(plan),
+          leftToDo: leftToDo(plan),
+        }))
 
       if (dryRun) {
         // The lines for a backend elsewhere are in the plan above already.
         const byHand = plans.flatMap((plan) => plan.after)
         output.result(
-          { ok: true, dryRun: true, modules: data },
+          { ok: true, dryRun: true, modules: data() },
           [
             ...shown,
             ...(byHand.length > 0
@@ -233,11 +301,31 @@ function changeCommand(
         }
       }
 
-      await carryOut(plans, project, context, output)
+      // The plans above were all made from the project as it was, to refuse
+      // and to show before anything changed. A module after the first is
+      // planned again once the one before it is done, from the project as
+      // that one left it: its files, what is enabled and what is on record.
+      const done: string[] = []
+      for (const [index, module] of modules.entries()) {
+        if (index > 0) {
+          const again = await planFor(module)
+          const stopped = refusalsOf(again)
+          if (stopped.length > 0) {
+            throw new DrxError('refused', stopped.join('\n'))
+          }
+          plans[index] = again
+        }
+        const plan = plans[index] as ModulePlan
+        await carryOut(plan, project, context, output, {
+          done,
+          pending: plans.slice(index + 1).flatMap(stepLabels),
+        })
+        done.push(...stepLabels(plan))
+      }
 
       const left = plans.flatMap(leftToDo)
       output.result(
-        { ok: true, dryRun: false, modules: data },
+        { ok: true, dryRun: false, modules: data() },
         [
           ...plans.map((plan) =>
             // A removal with no step found everything in place before it.

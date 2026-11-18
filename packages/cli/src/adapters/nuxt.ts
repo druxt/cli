@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   emptyChange,
   type KindAdapter,
@@ -63,18 +63,105 @@ async function packageVersion(
   return { name, range, installed }
 }
 
-/** The package manager of a part, by the lock file it keeps. */
+/**
+ * The package managers a part may be installed with, each with its lock
+ * files and the words it adds and removes a package with. `separator` is
+ * true where the manager is known to take `--` before the names, so that a
+ * name is never read as an option.
+ */
 const MANAGERS = [
-  { lock: 'pnpm-lock.yaml', tool: 'pnpm', add: 'add', remove: 'remove' },
-  { lock: 'yarn.lock', tool: 'yarn', add: 'add', remove: 'remove' },
-  { lock: 'bun.lock', tool: 'bun', add: 'add', remove: 'remove' },
-  { lock: 'bun.lockb', tool: 'bun', add: 'add', remove: 'remove' },
+  {
+    tool: 'pnpm',
+    locks: ['pnpm-lock.yaml'],
+    add: 'add',
+    remove: 'remove',
+    separator: true,
+  },
+  {
+    tool: 'yarn',
+    locks: ['yarn.lock'],
+    add: 'add',
+    remove: 'remove',
+    separator: true,
+  },
+  {
+    tool: 'bun',
+    locks: ['bun.lock', 'bun.lockb'],
+    add: 'add',
+    remove: 'remove',
+    separator: false,
+  },
+  {
+    tool: 'npm',
+    locks: ['package-lock.json', 'npm-shrinkwrap.json'],
+    add: 'install',
+    remove: 'uninstall',
+    separator: true,
+  },
 ] as const
-const NPM = { tool: 'npm', add: 'install', remove: 'uninstall' } as const
+type Manager = (typeof MANAGERS)[number]
+const NPM = MANAGERS[3]
 
-function packageManager(dir: string) {
-  return MANAGERS.find(({ lock }) => existsSync(join(dir, lock))) ?? NPM
+/** The directories from the project's root down to the part, or the part. */
+function fromRoot(dir: string, root: string | undefined): string[] {
+  const part = resolve(dir)
+  const top = root === undefined ? part : resolve(root)
+  const down = relative(top, part)
+  if (down === '') return [part]
+  if (down.startsWith('..') || isAbsolute(down)) return [part]
+  const dirs = [top]
+  for (const segment of down.split(sep)) {
+    dirs.push(join(dirs.at(-1) as string, segment))
+  }
+  return dirs
 }
+
+/**
+ * The package manager of a part, found the way an install of the whole
+ * project finds it. The manager a package.json declares in `packageManager`
+ * comes first, looked for from the root of the project down to the part, so
+ * a workspace is installed with the manager of its root. Without one, it is
+ * the manager of the first lock file on the same way down, and npm when
+ * there is no lock file either.
+ */
+async function packageManager(
+  dir: string,
+  root: string | undefined
+): Promise<Manager> {
+  const dirs = fromRoot(dir, root)
+  for (const at of dirs) {
+    const manifest = await readJsonObject(join(at, 'package.json'))
+    const declared = String(manifest?.packageManager ?? '').split('@')[0]
+    const manager = MANAGERS.find(({ tool }) => tool === declared)
+    if (manager) return manager
+  }
+  for (const at of dirs) {
+    const manager = MANAGERS.find(({ locks }) =>
+      locks.some((lock) => existsSync(join(at, lock)))
+    )
+    if (manager) return manager
+  }
+  return NPM
+}
+
+/** The arguments that add or remove one package with a manager. */
+const packageArgs = (manager: Manager, verb: 'add' | 'remove', name: string) =>
+  manager.separator ? [manager[verb], '--', name] : [manager[verb], name]
+
+/**
+ * The change to the config that adds or removes a module, for the file as
+ * it is when the change is made.
+ */
+const moduleEdit =
+  (file: string, name: string, action: 'add' | 'remove') =>
+  (source: string): string => {
+    const edit = editModules(source, name, action)
+    if (edit.kind === 'changed') return edit.content
+    if (edit.kind === 'unchanged') return source
+    throw new Error(
+      `${file} has changed since it was read, and its modules can no longer be edited safely.`
+    )
+  }
 
 const configFile = (dir: string) =>
   CONFIG_FILES.find((candidate) => existsSync(join(dir, candidate)))
@@ -86,19 +173,21 @@ const configFile = (dir: string) =>
  */
 async function addModule(
   dir: string,
-  name: string | undefined
+  name: string | undefined,
+  root: string | undefined
 ): Promise<ModuleChange> {
   const change = emptyChange()
   if (!name) return change
   const did: PackageRecord = { installed: false, listed: false }
   change.did = did
 
-  const manager = packageManager(dir)
+  const manager = await packageManager(dir, root)
   if (name in (await declared(dir))) {
     change.notes.push(`${name} is already a dependency in package.json.`)
   } else {
     change.steps.push({
-      run: { tool: manager.tool, args: [manager.add, name] },
+      run: { tool: manager.tool, args: packageArgs(manager, 'add', name) },
+      did: { installed: true },
     })
     did.installed = true
   }
@@ -115,9 +204,10 @@ async function addModule(
     change.steps.push({
       edit: {
         file,
-        content: edit.content,
+        change: moduleEdit(file, name, 'add'),
         summary: `Add '${name}' to modules in ${file}`,
       },
+      did: { listed: true },
     })
     did.listed = true
   } else if (edit.kind === 'unsafe') {
@@ -139,12 +229,13 @@ async function addModule(
 async function removeModule(
   dir: string,
   name: string | undefined,
-  did: PackageRecord | undefined
+  did: PackageRecord | undefined,
+  root: string | undefined
 ): Promise<ModuleChange> {
   const change = emptyChange()
   if (!name) return change
 
-  const manager = packageManager(dir)
+  const manager = await packageManager(dir, root)
   const dependency = name in (await declared(dir))
   const file = configFile(dir)
   const edit = file
@@ -167,7 +258,7 @@ async function removeModule(
   if (dependency) {
     if (did.installed) {
       change.steps.push({
-        run: { tool: manager.tool, args: [manager.remove, name] },
+        run: { tool: manager.tool, args: packageArgs(manager, 'remove', name) },
       })
     } else {
       change.notes.push(
@@ -184,7 +275,7 @@ async function removeModule(
     change.steps.push({
       edit: {
         file,
-        content: edit.content,
+        change: moduleEdit(file, name, 'remove'),
         summary: `Remove '${name}' from modules in ${file}`,
       },
     })
@@ -234,7 +325,7 @@ export const nuxtAdapter: KindAdapter = {
 
   package: packageVersion,
 
-  addModule: (dir, request) => addModule(dir, request.package),
+  addModule: (dir, request) => addModule(dir, request.package, request.root),
   removeModule: (dir, request) =>
-    removeModule(dir, request.package, request.did),
+    removeModule(dir, request.package, request.did, request.root),
 }

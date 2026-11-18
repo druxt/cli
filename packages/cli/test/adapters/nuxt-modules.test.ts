@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
 import { adapterFor } from '../../src/adapters/index.js'
@@ -23,21 +24,46 @@ export default defineNuxtConfig({
 })
 `
 
-const add = (dir: string, name = 'druxt-breadcrumb') =>
-  nuxt.addModule(dir, {
-    package: name,
-    needs: [],
-    patches: true,
-    registryStatesCore: false,
-  })
+/** The part each change was planned for, to make an edit's content from. */
+const parts = new WeakMap<ModuleChange, string>()
+const planned = async (dir: string, change: Promise<ModuleChange>) => {
+  parts.set(await change, dir)
+  return change
+}
+
+const add = (dir: string, name = 'druxt-breadcrumb', root?: string) =>
+  planned(
+    dir,
+    nuxt.addModule(dir, {
+      package: name,
+      needs: [],
+      patches: true,
+      registryStatesCore: false,
+      ...(root ? { root } : {}),
+    })
+  )
 const DID = { installed: true, listed: true }
-const remove = (dir: string, name = 'druxt-breadcrumb', did = DID) =>
-  nuxt.removeModule(dir, { package: name, did })
+const remove = (
+  dir: string,
+  name = 'druxt-breadcrumb',
+  did = DID,
+  root?: string
+) =>
+  planned(
+    dir,
+    nuxt.removeModule(dir, { package: name, did, ...(root ? { root } : {}) })
+  )
 
 const runs = (change: ModuleChange) =>
   change.steps.flatMap((step) => ('run' in step ? [step.run] : []))
+/** The edits of a change, each with the content it makes of the file now. */
 const edits = (change: ModuleChange) =>
-  change.steps.flatMap((step) => ('edit' in step ? [step.edit] : []))
+  change.steps.flatMap((step) => {
+    if (!('edit' in step)) return []
+    const file = join(parts.get(change) as string, step.edit.file)
+    const content = step.edit.change(readFileSync(file, 'utf8'))
+    return [{ ...step.edit, content }]
+  })
 
 function part(files: Record<string, unknown>): string {
   const dir = tmp('drx-part-')
@@ -50,21 +76,22 @@ describe('the package manager of a frontend part', () => {
     [
       'package-lock.json',
       'npm',
-      ['install', 'druxt-breadcrumb'],
-      ['uninstall', 'druxt-breadcrumb'],
+      ['install', '--', 'druxt-breadcrumb'],
+      ['uninstall', '--', 'druxt-breadcrumb'],
     ],
     [
       'pnpm-lock.yaml',
       'pnpm',
-      ['add', 'druxt-breadcrumb'],
-      ['remove', 'druxt-breadcrumb'],
+      ['add', '--', 'druxt-breadcrumb'],
+      ['remove', '--', 'druxt-breadcrumb'],
     ],
     [
       'yarn.lock',
       'yarn',
-      ['add', 'druxt-breadcrumb'],
-      ['remove', 'druxt-breadcrumb'],
+      ['add', '--', 'druxt-breadcrumb'],
+      ['remove', '--', 'druxt-breadcrumb'],
     ],
+    // Not known to take the separator, so it is left out.
     [
       'bun.lock',
       'bun',
@@ -74,8 +101,8 @@ describe('the package manager of a frontend part', () => {
     [
       'README.md',
       'npm',
-      ['install', 'druxt-breadcrumb'],
-      ['uninstall', 'druxt-breadcrumb'],
+      ['install', '--', 'druxt-breadcrumb'],
+      ['uninstall', '--', 'druxt-breadcrumb'],
     ],
   ])('with %s is %s', async (lock, tool, installArgs, removeArgs) => {
     const dir = part({
@@ -87,6 +114,95 @@ describe('the package manager of a frontend part', () => {
       { tool, args: installArgs },
     ])
     expect(runs(await remove(dir))).toEqual([{ tool, args: removeArgs }])
+  })
+
+  /** A project whose frontend part is one directory down from its root. */
+  function workspace(
+    rootFiles: Record<string, unknown>,
+    partFiles: Record<string, unknown> = {}
+  ) {
+    const root = tmp('drx-root-')
+    writeTree(root, {
+      ...rootFiles,
+      'web/package.json': {},
+      ...Object.fromEntries(
+        Object.entries(partFiles).map(([file, content]) => [
+          `web/${file}`,
+          content,
+        ])
+      ),
+    })
+    return { root, dir: join(root, 'web') }
+  }
+  const tool = async (
+    rootFiles: Record<string, unknown>,
+    partFiles: Record<string, unknown> = {}
+  ) => {
+    const { root, dir } = workspace(rootFiles, partFiles)
+    const added = runs(await add(dir, 'druxt-breadcrumb', root))[0]?.tool
+    writeTree(dir, {
+      'package.json': {
+        ...(partFiles['package.json'] as object),
+        dependencies: { 'druxt-breadcrumb': '^0.1.0' },
+      },
+    })
+    const removed = runs(await remove(dir, 'druxt-breadcrumb', DID, root))[0]
+    expect(removed?.tool).toBe(added)
+    return added
+  }
+
+  test('is the one the root of the project declares, with no lock file yet', async () => {
+    expect(
+      await tool({ 'package.json': { packageManager: 'pnpm@10.4.1' } })
+    ).toBe('pnpm')
+  })
+
+  test('is the one of a lock file at the root of a workspace', async () => {
+    expect(await tool({ 'package.json': {}, 'yarn.lock': '' })).toBe('yarn')
+    expect(await tool({ 'pnpm-lock.yaml': '' })).toBe('pnpm')
+  })
+
+  test('is the declared one before that of any lock file', async () => {
+    expect(
+      await tool(
+        { 'package.json': { packageManager: 'yarn@4.5.0' } },
+        { 'package-lock.json': '{}' }
+      )
+    ).toBe('yarn')
+    expect(
+      await tool(
+        { 'yarn.lock': '' },
+        { 'package.json': { packageManager: 'pnpm@9.0.0' } }
+      )
+    ).toBe('pnpm')
+  })
+
+  test('is the one the root declares before the one the part declares', async () => {
+    expect(
+      await tool(
+        { 'package.json': { packageManager: 'npm@11.0.0' } },
+        { 'package.json': { packageManager: 'pnpm@9.0.0' } }
+      )
+    ).toBe('npm')
+  })
+
+  test('is npm for a manager it does not know, and with nothing to go by', async () => {
+    expect(
+      await tool({ 'package.json': { packageManager: 'vlt@1.0.0' } })
+    ).toBe('npm')
+    expect(await tool({})).toBe('npm')
+  })
+
+  test('does not look above the root of the project', async () => {
+    const outer = tmp('drx-outer-')
+    writeTree(outer, {
+      'package.json': { packageManager: 'pnpm@10.4.1' },
+      'pnpm-lock.yaml': '',
+      'site/web/package.json': {},
+    })
+    const root = join(outer, 'site')
+    const change = await add(join(root, 'web'), 'druxt-breadcrumb', root)
+    expect(runs(change)[0]?.tool).toBe('npm')
   })
 })
 

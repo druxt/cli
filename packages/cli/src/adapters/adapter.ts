@@ -35,7 +35,13 @@ export interface KindAdapter {
    * The values of one reach the tools of the part as arguments, so each is
    * checked by its pattern where it is read, before any command is built.
    */
-  moduleProblem?(module: { name: string }): FieldProblem | undefined
+  moduleProblem?(module: BackendModule): FieldProblem | undefined
+  /**
+   * What is wrong with a record of what was done to a part of this kind, or
+   * undefined. A record is read from a file anybody may have written, and
+   * its values reach the same tools, so it is checked in the same way.
+   */
+  recordProblem?(record: BackendRecord): FieldProblem | undefined
   /** The packages `info` reports for a part of this kind. */
   packages(dir: string): Promise<PackageVersion[]>
   /**
@@ -69,19 +75,43 @@ export interface ToolRun {
  */
 export type Ask = (tool: string, args: string[]) => Promise<ToolResult>
 
-/** A file of the part to write, with its whole new content. */
+/**
+ * A change to a file of the part. The new content is worked out from the
+ * file as it is when the step is taken, never from a copy read while
+ * planning: a tool or another module may have written to it in between.
+ */
 export interface FileEdit {
   /** Relative to the part. */
   file: string
-  content: string
+  /**
+   * The content to write, given the content the file has now. It throws,
+   * with the reason, when the file no longer takes the change.
+   */
+  change(source: string): string
   /** What the edit does, as one line. */
   summary: string
+}
+
+/**
+ * One step of a change. For an add it carries what it will have done once
+ * it is taken, so the record can say what was done when a later step fails.
+ */
+export type ChangeStep = ({ run: ToolRun } | { edit: FileEdit }) & {
+  /** What the step does about the package of the module. */
+  did?: Partial<PackageRecord>
+  /** What the step does to a backend part. */
+  record?: BackendRecord
 }
 
 /** What a module needs of a part. A kind reads the fields that apply to it. */
 export interface AddRequest {
   /** The frontend package of the module. */
   package?: string
+  /**
+   * The root of the project the part is in. A part looks from there down to
+   * itself for what the whole project declares, such as its package manager.
+   */
+  root?: string
   /** The backend modules it needs, of this part's kind. */
   needs: BackendModule[]
   /** False to leave the patches of those modules out. */
@@ -97,6 +127,8 @@ export interface AddRequest {
 
 export interface RemoveRequest {
   package?: string
+  /** The root of the project the part is in. */
+  root?: string
   /**
    * What an earlier add did to the package in this part. Undefined when the
    * record does not say, as one written by an older version does not.
@@ -138,7 +170,7 @@ export interface BackendRecord {
 
 /** The steps of a change to one part, in the order to take them. */
 export interface ModuleChange {
-  steps: ({ run: ToolRun } | { edit: FileEdit })[]
+  steps: ChangeStep[]
   /** Reasons the change cannot be made. With any, no step is taken. */
   problems: string[]
   warnings: string[]
@@ -156,11 +188,12 @@ export interface ModuleChange {
    */
   record?: BackendRecord
   /**
-   * For an add, asks the part what the steps did once they have run, and
-   * gives the record to keep in place of `record`. A backend may enable more
-   * than it was asked to, and only then can that be seen.
+   * For an add, asks the part what the steps did once they have run, or
+   * once one of them has failed. It is given the record of the steps that
+   * were taken, and returns the record to keep. A backend may enable more
+   * than it was asked to, or less, and only then can that be seen.
    */
-  settle?: () => Promise<BackendRecord>
+  settle?: (done: BackendRecord) => Promise<BackendRecord>
 }
 
 export function emptyChange(): ModuleChange {

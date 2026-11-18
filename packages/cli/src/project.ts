@@ -4,10 +4,11 @@ import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { loadConfig } from 'c12'
 import type { BackendRecord, PackageRecord } from './adapters/adapter.js'
+import { adapterFor } from './adapters/index.js'
 import { DrxError } from './errors.js'
 import { isLayout, LAYOUTS, type Layout } from './layouts.js'
 import { partsProblem, type Part } from './parts.js'
-import { isNonEmptyString, isRecord } from './validate.js'
+import { isNonEmptyString, isNpmName, isRecord } from './validate.js'
 
 const nodeRequire = createRequire(import.meta.url)
 
@@ -136,6 +137,25 @@ function configProblem(config: Record<string, unknown>): string | undefined {
     }
     if (!Array.isArray((module as Record<string, unknown>).backend)) {
       return `${at}.backend must be an array`
+    }
+    // The file comes with a clone of the project, and a remove hands what
+    // the record names to the tools of each part. So every name in it is
+    // checked here, as the same name is when it is read from a registry.
+    const record = moduleRecord(module as Raw)
+    if (!isNpmName(record.package)) {
+      return `${at}.package must be the name of an npm package`
+    }
+    for (const [position, entry] of record.backend.entries()) {
+      // A record for a path no part is at is never acted on.
+      const part = (config.parts as Part[]).find(
+        (candidate) => candidate.path === entry.path
+      )
+      const problem = part
+        ? adapterFor(part.kind)?.recordProblem?.(entry)
+        : undefined
+      if (problem) {
+        return `${at}.backend[${position}].${problem.field} ${problem.must}`
+      }
     }
   }
   return undefined

@@ -233,7 +233,7 @@ describe('bare drx in a terminal, inside a project', () => {
       }
     )
     expect(result.code).toBe(0)
-    expect(calls[0]).toBe('npm install druxt-blocks')
+    expect(calls[0]).toBe('npm install -- druxt-blocks')
     expect(result.stdout).toContain('Added blocks.')
     expect(result.stderr).toContain('Repeat this with: drx add blocks --yes')
   })

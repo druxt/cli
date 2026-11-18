@@ -27,7 +27,13 @@ import {
   type Layout,
 } from '../layouts.js'
 import { columns, createOutput, type Output } from '../output.js'
-import { writeProjectConfig, type ProjectConfig } from '../project.js'
+import {
+  CONFIG_FILE,
+  loadProjectConfig,
+  writeProjectConfig,
+  type ModuleRecord,
+  type ProjectConfig,
+} from '../project.js'
 import type { StarterEntry } from '../registry/entry.js'
 import { repeatCommand, shellQuote } from '../repeat.js'
 import {
@@ -541,6 +547,20 @@ async function runInit(
   }
   const { entry, layout, engine, target, held, install } = settled
 
+  // The record of what `drx add` did is the project's own. A starter knows
+  // nothing of it, and without it nothing that was added could be removed.
+  let kept: ModuleRecord[] = []
+  if (held && existsSync(join(target, CONFIG_FILE))) {
+    try {
+      kept = (await loadProjectConfig(target)).modules ?? []
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      output.warn(
+        `The ${CONFIG_FILE} that was in ${target} could not be read, so no record of added modules was kept from it. ${detail}`
+      )
+    }
+  }
+
   output.note(`Fetching the ${entry.name} starter from ${entry.tar}.`)
   try {
     await context.download(`starter:${entry.name}`, {
@@ -623,8 +643,14 @@ async function runInit(
           }
         : part
     ),
+    ...(kept.length > 0 ? { modules: kept } : {}),
   }
   await writeProjectConfig(target, config)
+  if (kept.length > 0) {
+    output.note(
+      `Kept the record of the ${kept.length} module${kept.length === 1 ? '' : 's'} drx add put in this project.`
+    )
+  }
   const commands = warnAboutStarter(entry, engine, target, context, output)
 
   if (install) {

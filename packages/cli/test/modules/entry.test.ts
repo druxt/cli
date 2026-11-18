@@ -5,6 +5,9 @@ import { moduleRegistry, moduleRegistryWith } from '../helpers/modules.js'
 
 const AT = 'https://example.com/modules.json'
 const NPM_NAME = 'modules[1].npm must be the name of an npm package'
+const PACKAGE =
+  'package must be the name of a Composer package, as in vendor/name'
+const CONSTRAINT = 'constraint must be a Composer version constraint'
 const MODULE_NAME =
   'modules[1].drupal[0].name must be a machine name: lower-case letters, digits and underscores, starting with a letter'
 
@@ -272,6 +275,39 @@ describe('parseModuleRegistry', () => {
       },
       'patches[0].until must be a string',
     ],
+    [{ composer: { package: '--working-dir=/tmp' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'decoupled_router' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'Drupal/Token' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'drupal/a b' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'drupal/x:^1 | calc' } }, `composer.${PACKAGE}`],
+    [
+      { composer: { package: 'drupal/x', constraint: '--no-plugins' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      { composer: { package: 'drupal/x', constraint: '^1 & calc' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      { composer: { package: 'drupal/x', constraint: '"^1"' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      { composer: { package: 'drupal/x', constraint: '' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      {
+        patches: [
+          {
+            description: 'x',
+            url: 'https://example.com/a.diff',
+            package: '-d',
+          },
+        ],
+      },
+      `patches[0].${PACKAGE}`,
+    ],
   ])('names the bad field of a backend module in %j', (extra, message) => {
     const registry = moduleRegistryWith(1, (module) => {
       module.drupal = [{ name: 'block', label: 'Block', ...extra }]
@@ -279,5 +315,70 @@ describe('parseModuleRegistry', () => {
     expect(() => parseModuleRegistry(registry, AT)).toThrow(
       `The module registry at ${AT} is invalid: modules[1].drupal[0].${message}.`
     )
+  })
+
+  test.each([
+    '^1.2',
+    '~2.0@beta',
+    '>=1.0 <2.0 || ^3',
+    '1.0 - 2.0',
+    'dev-main',
+    '1.x-dev#abc123',
+    'dev-feature/thing as 1.0.0',
+    '*',
+    '!=1.3.0, >=1.2',
+  ])('takes %j as a constraint', (constraint) => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [
+        {
+          name: 'block',
+          label: 'Block',
+          composer: { package: 'drupal/jsonapi_menu_items', constraint },
+        },
+      ]
+    })
+    expect(
+      parseModuleRegistry(registry, AT)[1]?.backend[0]?.composer?.constraint
+    ).toBe(constraint)
+  })
+
+  test.each(['drupal/core', 'cweagans/composer-patches', 'a/b', 'my.org/a--b'])(
+    'takes %j as a package',
+    (name) => {
+      const registry = moduleRegistryWith(1, (module) => {
+        module.drupal = [
+          {
+            name: 'block',
+            label: 'Block',
+            composer: { package: name },
+            patches: [
+              {
+                description: 'x',
+                url: 'https://example.com/a.diff',
+                package: name,
+              },
+            ],
+          },
+        ]
+      })
+      expect(
+        parseModuleRegistry(registry, AT)[1]?.backend[0]?.composer?.package
+      ).toBe(name)
+    }
+  )
+
+  test('checks a long name in no more time than a short one', () => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [
+        {
+          name: 'block',
+          label: 'Block',
+          composer: { package: `a/${'a-'.repeat(50_000)}!` },
+        },
+      ]
+    })
+    const started = performance.now()
+    expect(() => parseModuleRegistry(registry, AT)).toThrow(PACKAGE)
+    expect(performance.now() - started).toBeLessThan(200)
   })
 })

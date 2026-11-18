@@ -1,13 +1,13 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import type { Prompter } from '../src/context.js'
+import type { CliContext, Prompter } from '../src/context.js'
 import { validEngines } from './helpers/engines.js'
 import { moduleRegistry } from './helpers/modules.js'
 import { run } from './helpers/run.js'
 import { serve, type TestServer } from './helpers/server.js'
 import { fixtureRegistry, type FixtureRegistry } from './helpers/starter.js'
-import { cleanTmp, tmp } from './helpers/tmp.js'
+import { cleanTmp, tmp, writeTree } from './helpers/tmp.js'
 
 let modules: TestServer
 let starters: FixtureRegistry
@@ -130,6 +130,156 @@ describe.each(CONDITIONS)('with $name', (condition) => {
   )
 })
 
+/** A project with one frontend and one backend part, and nothing added. */
+function project(): string {
+  const root = tmp('drx-project-')
+  writeTree(root, {
+    'drx.config.json': {
+      layout: 'monorepo',
+      line: '0.x',
+      starter: 'quickstart',
+      source: 'npm',
+      parts: [
+        { role: 'frontend', kind: 'nuxt', path: 'nuxt' },
+        { role: 'backend', kind: 'drupal', path: 'drupal', engine: 'ddev' },
+      ],
+    },
+    'nuxt/package.json': { dependencies: { druxt: '^0.25.1' } },
+    'nuxt/node_modules/druxt/package.json': { version: '0.25.2' },
+    'nuxt/nuxt.config.js': 'export default {\n  modules: [],\n}\n',
+    'drupal/composer.json': { require: { 'drupal/core-recommended': '~11' } },
+  })
+  return root
+}
+
+/** Stand-ins for the tools: a package manager and a backend with a memory. */
+function tools() {
+  const calls: string[] = []
+  const enabled = new Set<string>()
+  const exec: CliContext['exec'] = async (command, args, { cwd }) => {
+    if (args.includes('pm:list')) {
+      const list = [...enabled].map((name) => [name, { name, path: '' }])
+      return { code: 0, output: JSON.stringify(Object.fromEntries(list)) }
+    }
+    const name = args.at(-1) as string
+    if (args.includes('--simulate')) {
+      return enabled.has(name)
+        ? {
+            code: 0,
+            output: `The following extensions will be uninstalled: ${name}\n`,
+          }
+        : { code: 1, output: `not installed: ${name}` }
+    }
+    calls.push(`${command} ${args.join(' ')}`)
+    if (command === 'npm') {
+      const file = join(cwd, 'package.json')
+      const manifest = JSON.parse(readFileSync(file, 'utf8'))
+      if (args[0] === 'install') manifest.dependencies[name] = '^1.0.0'
+      else delete manifest.dependencies[name]
+      writeFileSync(file, JSON.stringify(manifest, null, 2))
+    }
+    if (args.includes('en')) enabled.add(name)
+    if (args.includes('pmu')) enabled.delete(name)
+    return { code: 0, output: '' }
+  }
+  return { calls, exec }
+}
+
+describe.each(CONDITIONS)(
+  'adding and removing a module with $name',
+  (condition) => {
+    const ask = vi.fn(() => {
+      throw new Error('A prompt was shown.')
+    })
+    const unattended = (
+      argv: string[],
+      cwd: string,
+      exec: CliContext['exec']
+    ) =>
+      run(
+        [...argv, ...condition.flag],
+        {
+          cwd,
+          env: { XDG_CONFIG_HOME: tmp('drx-config-'), ...condition.env },
+          defaultModuleRegistry: `${modules.url}/modules.json`,
+          prompter: {
+            text: ask,
+            select: ask,
+            search: ask,
+            pickMany: ask,
+            confirm: ask,
+          } as unknown as Prompter,
+          exec,
+        },
+        condition.terminal ? { columns: 100 } : undefined
+      )
+    const recorded = (root: string) =>
+      JSON.parse(readFileSync(join(root, 'drx.config.json'), 'utf8')).modules
+
+    // Braces, so the mock is not handed back to be called as a cleanup.
+    beforeEach(() => {
+      ask.mockClear()
+    })
+
+    test('drx add and drx remove run to the end and ask nothing', async () => {
+      const root = project()
+      const { calls, exec } = tools()
+      const added = await unattended(['add', 'blocks'], root, exec)
+      expect(added.code, added.stderr).toBe(0)
+      expect(added.stdout).toBe('Added blocks.\n')
+      expect(recorded(root)).toHaveLength(1)
+      expect(readFileSync(join(root, 'nuxt/nuxt.config.js'), 'utf8')).toContain(
+        'druxt-blocks'
+      )
+
+      const removed = await unattended(
+        ['remove', 'blocks', '--backend'],
+        root,
+        exec
+      )
+      expect(removed.code, removed.stderr).toBe(0)
+      expect(removed.stdout).toBe('Removed blocks.\n')
+      expect(recorded(root)).toBeUndefined()
+      expect(calls).toEqual([
+        'npm install -- druxt-blocks',
+        'ddev drush en -y -- block',
+        'npm uninstall -- druxt-blocks',
+        'ddev drush pmu -y -- block',
+      ])
+      expect(ask).not.toHaveBeenCalled()
+      expect(added.stderr + removed.stderr).not.toContain('A prompt was shown.')
+    })
+
+    test('drx module add --json prints one document and asks nothing', async () => {
+      const root = project()
+      const result = await unattended(
+        ['module', 'add', 'blocks', '--json'],
+        root,
+        tools().exec
+      )
+      expect(result.code, result.stderr).toBe(0)
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        ok: true,
+        dryRun: false,
+        modules: [{ name: 'blocks', package: 'druxt-blocks' }],
+      })
+      expect(ask).not.toHaveBeenCalled()
+    })
+
+    test.each([
+      [['add'], 'Give the name of a module, as in "drx add blocks".'],
+      [['remove'], 'Give the name of a module, as in "drx remove blocks".'],
+      [['remove', 'blocks'], 'Cannot remove blocks: druxt-blocks is not in'],
+      [['add', 'legacy'], 'Cannot add legacy: legacy is archived.'],
+    ])('drx %j fails with a message, and asks nothing', async (argv, says) => {
+      const result = await unattended(argv, project(), tools().exec)
+      expect(result.code).toBe(1)
+      expect(result.stderr).toContain(says)
+      expect(ask).not.toHaveBeenCalled()
+    })
+  }
+)
+
 describe('an option given before the command of a group', () => {
   const unattended = (argv: string[]) =>
     run(argv, {
@@ -191,6 +341,32 @@ describe('an option given before the command of a group', () => {
         expect(before.stdout).not.toContain('druxt-auth')
         expect(before.stderr).toContain(url)
       }
+    } finally {
+      await other.close()
+    }
+  })
+
+  test('drx module add takes its registry and --json from before the command', async () => {
+    const other = await serve({
+      '/other.json': JSON.stringify({
+        schemaVersion: 1,
+        modules: [moduleRegistry().modules[1]],
+      }),
+    })
+    try {
+      const url = `${other.url}/other.json`
+      const result = await run(
+        ['module', '--module-registry', url, '--json', 'add', 'blocks'],
+        {
+          cwd: project(),
+          defaultModuleRegistry: `${modules.url}/modules.json`,
+          exec: tools().exec,
+        }
+      )
+      expect(result.code, result.stderr).toBe(0)
+      expect(JSON.parse(result.stdout).modules[0].name).toBe('blocks')
+      expect(other.requests).toHaveLength(1)
+      expect(modules.requests).toHaveLength(0)
     } finally {
       await other.close()
     }

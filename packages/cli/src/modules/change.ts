@@ -1,8 +1,14 @@
 import { existsSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { adapterFor, type KindAdapter } from '../adapters/index.js'
-import type { Ask, BackendRecord, ModuleChange } from '../adapters/adapter.js'
+import type {
+  Ask,
+  BackendRecord,
+  ChangeStep,
+  ModuleChange,
+  PackageRecord,
+} from '../adapters/adapter.js'
 import type { CliContext } from '../context.js'
 import { engineFor } from '../engines/index.js'
 import { DrxError } from '../errors.js'
@@ -10,6 +16,7 @@ import type { RunTool } from '../exec.js'
 import type { Output } from '../output.js'
 import type { Part } from '../parts.js'
 import {
+  loadProjectConfig,
   writeProjectConfig,
   type ModuleRecord,
   type ProjectConfig,
@@ -17,8 +24,12 @@ import {
 import { compatibility } from './compatibility.js'
 import type { ModuleEntry } from './entry.js'
 
-/** One thing to do to the project, as it will be shown and done. */
-export type PlannedStep =
+/**
+ * One thing to do to the project, as it will be shown and done. An edit
+ * holds the change and not the content: the content is made from the file
+ * as it is when the step is taken.
+ */
+export type PlannedStep = (
   | {
       type: 'run'
       command: string
@@ -26,7 +37,20 @@ export type PlannedStep =
       cwd: string
       display: string
     }
-  | { type: 'edit'; file: string; content: string; display: string }
+  | {
+      type: 'edit'
+      file: string
+      change: (source: string) => string
+      display: string
+    }
+) & {
+  /** For an add: what the step does about the package of the module. */
+  did?: Partial<PackageRecord>
+  /** For an add: what the step does to a backend part. */
+  record?: BackendRecord
+  /** True once the step has been taken. */
+  done?: boolean
+}
 
 /** The steps for one part, or what to do where a backend that is elsewhere is. */
 export interface PartPlan {
@@ -34,9 +58,11 @@ export interface PartPlan {
   steps: PlannedStep[]
   /** Why the steps cannot be taken from here, and the lines to run instead. */
   elsewhere?: { reason: string; lines: string[] }
-  record?: BackendRecord
-  /** Asks the part what the steps did, once they have run. */
-  settle?: () => Promise<BackendRecord>
+  /**
+   * Asks the part what the steps did, given the record of those that were
+   * taken, once they have run or one of them has failed.
+   */
+  settle?: (done: BackendRecord) => Promise<BackendRecord>
 }
 
 /** Why a module cannot be changed. `--force` goes past a forceable one. */
@@ -66,13 +92,19 @@ export interface ModulePlan {
    */
   handOver: { to: string; path: string; record: BackendRecord }[]
   /**
-   * Brings `record` in line with what the steps did, once they have run.
-   * A plan is made before anything is changed, and a part may do more than
-   * it was asked to.
+   * For an add, sets `record` to what the steps taken so far did. It is
+   * called once they have all run, and when one of them fails. A plan is
+   * made before anything is changed, and a part may do more than it was
+   * asked to, or less.
    */
   settle?: () => Promise<void>
 }
 
+/**
+ * The project a change is made to. `config` is kept in step with the file:
+ * carrying a plan out reads the file again, writes it and leaves the result
+ * here, for the plan of the next module to be made from.
+ */
 export interface Project {
   root: string
   config: ProjectConfig
@@ -121,6 +153,22 @@ function asker(project: Project, at: Located, exec: RunTool): Ask | undefined {
       cwd: join(project.root, line.cwd),
     })
   }
+}
+
+/** Why each part of a role in the project cannot be changed, as sentences. */
+function unusable(project: Project, role: Part['role']): string[] {
+  const parts = project.config.parts.filter((part) => part.role === role)
+  if (parts.length === 0) return [`The project has no ${role} part.`]
+  return parts.flatMap((part) => {
+    if (!adapterFor(part.kind)) {
+      return [
+        `${part.path}/ is of the kind ${part.kind}, which this version cannot add a module to.`,
+      ]
+    }
+    return existsSync(join(project.root, part.path))
+      ? []
+      : [`${part.path}/ does not exist.`]
+  })
 }
 
 const hasAny = (record: BackendRecord) =>
@@ -178,35 +226,67 @@ function mergeRecords(old: ModuleRecord, now: ModuleRecord): ModuleRecord {
       listed: entry.listed || before?.listed === true,
     }
   })
-  let backend = old.backend
-  for (const { path, ...record } of now.backend) {
-    backend = withBackend(backend, path, record)
-  }
+  // What this add did comes first, so a run that finishes what an earlier
+  // one left undone ends with the record of a run that did it all.
+  const nothing: BackendRecord = { modules: [], patches: [] }
+  const paths = [...now.backend, ...old.backend].map(({ path }) => path)
+  const backend = [...new Set(paths)].flatMap((path) => {
+    const merged = mergeBackend(
+      now.backend.find((entry) => entry.path === path) ?? nothing,
+      old.backend.find((entry) => entry.path === path) ?? nothing
+    )
+    return hasAny(merged) ? [{ path, ...merged }] : []
+  })
   return { name: now.name, package: now.package, frontend, backend }
 }
 
 const pluralPatches = (count: number) =>
   `${count} patch${count === 1 ? '' : 'es'}`
 
+/** A step of an adapter as one to show and take, with what it records. */
+function planned(
+  step: ChangeStep,
+  dir: string,
+  line: (run: { tool: string; args: string[] }) => {
+    command: string
+    args: string[]
+    cwd: string
+  }
+): PlannedStep {
+  const records = {
+    ...(step.did ? { did: step.did } : {}),
+    ...(step.record ? { record: step.record } : {}),
+  }
+  if ('edit' in step) {
+    return {
+      type: 'edit',
+      file: join(dir, step.edit.file),
+      change: step.edit.change,
+      display: step.edit.summary,
+      ...records,
+    }
+  }
+  const { command, args, cwd } = line(step.run)
+  return {
+    type: 'run',
+    command,
+    args,
+    cwd,
+    display: [command, ...args].join(' '),
+    ...records,
+  }
+}
+
 /** The steps of a frontend part, which are run in it as they are. */
 function frontendPlan(at: Located, change: ModuleChange): PartPlan {
   return {
     path: at.part.path,
-    steps: change.steps.map((step): PlannedStep =>
-      'run' in step
-        ? {
-            type: 'run',
-            command: step.run.tool,
-            args: step.run.args,
-            cwd: at.dir,
-            display: [step.run.tool, ...step.run.args].join(' '),
-          }
-        : {
-            type: 'edit',
-            file: join(at.dir, step.edit.file),
-            content: step.edit.content,
-            display: step.edit.summary,
-          }
+    steps: change.steps.map((step) =>
+      planned(step, at.dir, ({ tool, args }) => ({
+        command: tool,
+        args,
+        cwd: at.dir,
+      }))
     ),
   }
 }
@@ -252,25 +332,12 @@ function backendPlan(
 
   return {
     path: part.path,
-    steps: change.steps.map((step): PlannedStep => {
-      if ('edit' in step) {
-        return {
-          type: 'edit',
-          file: join(at.dir, step.edit.file),
-          content: step.edit.content,
-          display: step.edit.summary,
-        }
-      }
-      const line = engine.run(part, step.run.tool, step.run.args)
-      return {
-        type: 'run',
-        command: line.command,
-        args: line.args,
-        cwd: join(project.root, line.cwd),
-        display: [line.command, ...line.args].join(' '),
-      }
-    }),
-    ...(change.record ? { record: change.record } : {}),
+    steps: change.steps.map((step) =>
+      planned(step, at.dir, ({ tool, args }) => {
+        const line = engine.run(part, tool, args)
+        return { ...line, cwd: join(project.root, line.cwd) }
+      })
+    ),
     ...(change.settle ? { settle: change.settle } : {}),
   }
 }
@@ -325,12 +392,8 @@ export async function planAdd(
     return plan
   }
 
-  const record: ModuleRecord = {
-    name: module.name,
-    package: module.npm,
-    frontend: [],
-    backend: [],
-  }
+  const npm = module.npm
+  const frontend: { path: string; part: PartPlan }[] = []
   for (const at of located(project, 'frontend')) {
     const druxt = await at.adapter.druxt(at.dir)
     const fit = compatibility(module.druxt, druxt)
@@ -346,24 +409,37 @@ export async function planAdd(
       )
     }
     const change = await at.adapter.addModule(at.dir, {
-      package: module.npm,
+      package: npm,
+      root: project.root,
       needs: [],
       patches: options.patches,
       registryStatesCore: options.registryStatesCore,
     })
     absorb(plan, change)
-    plan.parts.push(frontendPlan(at, change))
-    if (change.did) {
-      record.frontend?.push({ path: at.part.path, ...change.did })
-    }
+    const part = frontendPlan(at, change)
+    plan.parts.push(part)
+    if (change.did) frontend.push({ path: at.part.path, part })
+  }
+  // With no part to put the package in, nothing would be added at all.
+  if (frontend.length === 0) {
+    plan.refusals.push({
+      reason: [
+        `No frontend part of this project can take ${npm}.`,
+        ...unusable(project, 'frontend'),
+      ].join(' '),
+      forceable: false,
+    })
+    return plan
   }
 
   const backend: { path: string; part: PartPlan }[] = []
-  for (const at of located(project, 'backend')) {
+  const parts = located(project, 'backend')
+  for (const at of parts) {
     const needs = module.backend.filter((need) => need.kind === at.part.kind)
     if (needs.length === 0) continue
     const ask = asker(project, at, options.exec)
     const change = await at.adapter.addModule(at.dir, {
+      root: project.root,
       needs,
       patches: options.patches,
       registryStatesCore: options.registryStatesCore,
@@ -375,25 +451,57 @@ export async function planAdd(
     backend.push({ path: at.part.path, part })
   }
 
+  // What the module needs of a backend that no part of the project is, is
+  // for the user to do where that backend runs.
+  const unmet = module.backend.filter(
+    (need) => !parts.some((at) => at.part.kind === need.kind)
+  )
+  if (unmet.length > 0) {
+    plan.after.push(
+      `${module.name} needs a backend, and this project has no backend part that can take what it needs. Where the backend is:`,
+      ...unmet.flatMap((need) => [
+        `  Enable ${need.label} (${need.name})`,
+        ...(options.patches ? (need.patches ?? []) : []).map(
+          (patch) =>
+            `  Patch ${patch.package ?? need.label} with ${patch.url} (${patch.description})`
+        ),
+        ...(need.setup ?? []).flatMap((step) => [
+          `  ${need.label}: ${step.title}`,
+          ...(step.command ? [`    ${step.command}`] : []),
+          ...(step.url ? [`    ${step.url}`] : []),
+        ]),
+      ])
+    )
+  }
+
   // A module added before keeps what that add did: this one found it there.
   const before = project.config.modules?.find(
     (entry) => entry.name === module.name
   )
-  const build = (): ModuleRecord => {
-    const now: ModuleRecord = {
-      ...record,
-      backend: backend.flatMap(({ path, part }) =>
-        part.record && hasAny(part.record) ? [{ path, ...part.record }] : []
-      ),
-    }
-    return before ? mergeRecords(before, now) : now
-  }
-  plan.record = build()
+  // The record is what the steps taken did, and no more. Each step says
+  // what it does, so the record is as true of a run that stopped part way
+  // as of one that finished.
+  const taken = (part: PartPlan) => part.steps.filter((step) => step.done)
   plan.settle = async () => {
-    for (const { part } of backend) {
-      if (part.settle) part.record = await part.settle()
+    const now: ModuleRecord = {
+      name: module.name,
+      package: npm,
+      frontend: frontend.map(({ path, part }) => ({
+        path,
+        installed: taken(part).some((step) => step.did?.installed === true),
+        listed: taken(part).some((step) => step.did?.listed === true),
+      })),
+      backend: [],
     }
-    plan.record = build()
+    for (const { path, part } of backend) {
+      let done: BackendRecord = { modules: [], patches: [] }
+      for (const step of taken(part)) {
+        if (step.record) done = mergeBackend(done, step.record)
+      }
+      if (part.settle) done = await part.settle(done)
+      if (hasAny(done)) now.backend.push({ path, ...done })
+    }
+    plan.record = before ? mergeRecords(before, now) : now
   }
   return plan
 }
@@ -451,6 +559,7 @@ export async function planRemove(
       : undefined
     const change = await at.adapter.removeModule(at.dir, {
       ...(module.npm ? { package: module.npm } : {}),
+      root: project.root,
       ...(did ? { did: { installed: did.installed, listed: did.listed } } : {}),
     })
     absorb(plan, change)
@@ -535,6 +644,7 @@ export async function planRemove(
 
     const ask = asker(project, at, options.exec)
     const change = await at.adapter.removeModule(at.dir, {
+      root: project.root,
       record: {
         modules: entry.modules.filter((held) => !staying.includes(held)),
         patches: entry.patches.filter((patch) => !stays(patch)),
@@ -601,93 +711,148 @@ export function planData(plan: ModulePlan) {
   ])
 }
 
+/** The steps taken and not taken by the other modules of a run, as labels. */
+export interface Around {
+  done: string[]
+  pending: string[]
+}
+
+/** The labels of the steps of a plan, as a failure lists them. */
+export function stepLabels(plan: ModulePlan): string[] {
+  return plan.parts.flatMap((part) =>
+    part.steps.map((step) => `${part.path}/: ${step.display}`)
+  )
+}
+
 /**
- * Carries out the plans in order and keeps the project's record in step.
- * The first tool that fails stops everything: its output is shown, with what
- * had been done by then and what had not.
+ * Puts the record of a plan into the project's config file. The file is
+ * read again first, so what was written to it since the command started is
+ * kept, and the result is left on `project` for whatever is planned next.
+ */
+async function writeRecord(
+  plan: ModulePlan,
+  project: Project,
+  handOver: boolean
+): Promise<void> {
+  const config = await loadProjectConfig(project.root)
+  let modules = (config.modules ?? []).filter(
+    (entry) => entry.name !== plan.module.name
+  )
+  if (plan.record) modules = [...modules, plan.record]
+  for (const { to, path, record } of handOver ? plan.handOver : []) {
+    modules = modules.map((entry) =>
+      entry.name === to
+        ? { ...entry, backend: withBackend(entry.backend, path, record) }
+        : entry
+    )
+  }
+  const rest: ProjectConfig = { ...config }
+  delete rest.modules
+  project.config = modules.length > 0 ? { ...rest, modules } : rest
+  await writeProjectConfig(project.root, project.config)
+}
+
+/**
+ * Carries out one plan and keeps the project's record in step. The first
+ * step that fails stops everything: its output is shown, with what had been
+ * done by then and what had not.
+ *
+ * A plan is carried out as soon as it is made, and the plan of the next
+ * module is made after it, from the project as this one left it.
+ *
+ * The record is true after a failure as well. An add that stops part way
+ * records the steps it took, so a second run finishes the job and a remove
+ * undoes what was done. A remove that stops keeps its record whole, and a
+ * second run finds what is already gone.
  */
 export async function carryOut(
-  plans: ModulePlan[],
+  plan: ModulePlan,
   project: Project,
   context: CliContext,
-  output: Output
+  output: Output,
+  around: Around = { done: [], pending: [] }
 ): Promise<void> {
-  const all = plans.flatMap((plan) =>
-    plan.parts.flatMap((part) =>
-      part.steps.map((step) => ({
-        step,
-        label: `${part.path}/: ${step.display}`,
-        path: part.path,
-      }))
-    )
+  const steps = plan.parts.flatMap((part) =>
+    part.steps.map((step) => ({
+      step,
+      path: part.path,
+      label: `${part.path}/: ${step.display}`,
+    }))
   )
-  let done = 0
-  let config = project.config
+  const list = (title: string, labels: string[]) =>
+    labels.length > 0 ? [title, ...labels.map((label) => `  ${label}`)] : []
 
-  for (const plan of plans) {
-    for (const part of plan.parts) {
-      for (const step of part.steps) {
-        if (step.type === 'edit') {
-          await mkdir(dirname(step.file), { recursive: true })
-          await writeFile(step.file, step.content)
-          output.did(`${part.path}/: ${step.display}`)
-        } else {
-          output.note(`${part.path}/: ${step.display}`)
-          const result = await context.exec(step.command, step.args, {
-            cwd: step.cwd,
-          })
-          if (result.code !== 0) {
-            const list = (title: string, labels: string[]) =>
-              labels.length > 0
-                ? [title, ...labels.map((label) => `  ${label}`)]
-                : []
-            const finished = all.slice(0, done).map(({ label }) => label)
-            const pending = all.slice(done).map(({ label }) => label)
-            const shown = result.output.trimEnd()
-            throw new DrxError(
-              'step-failed',
-              [
-                `${step.display} failed in ${part.path}/ with exit code ${result.code}.`,
-                shown,
-                ...list('Done:', finished),
-                ...list('Not done:', pending),
-              ]
-                .filter((line) => line !== '')
-                .join('\n'),
-              {
-                failed: {
-                  part: part.path,
-                  step: step.display,
-                  exitCode: result.code,
-                  output: shown,
-                },
-                done: finished,
-                notDone: pending,
-              }
-            )
-          }
-        }
-        done += 1
+  const fail = async (
+    at: (typeof steps)[number],
+    headline: string,
+    exitCode: number,
+    shown: string
+  ): Promise<never> => {
+    const taken = steps.filter(({ step }) => step.done)
+    if (plan.action === 'add' && taken.length > 0) {
+      await plan.settle?.()
+      await writeRecord(plan, project, false)
+    }
+    const finished = [...around.done, ...taken.map(({ label }) => label)]
+    const pending = [
+      ...steps.filter(({ step }) => !step.done).map(({ label }) => label),
+      ...around.pending,
+    ]
+    throw new DrxError(
+      'step-failed',
+      [
+        headline,
+        shown,
+        ...list('Done:', finished),
+        ...list('Not done:', pending),
+      ]
+        .filter((line) => line !== '')
+        .join('\n'),
+      {
+        failed: {
+          part: at.path,
+          step: at.step.display,
+          exitCode,
+          output: shown,
+        },
+        done: finished,
+        notDone: pending,
+      }
+    )
+  }
+
+  for (const at of steps) {
+    const { step, path, label } = at
+    if (step.type === 'edit') {
+      let source: string
+      let content: string
+      try {
+        source = await readFile(step.file, 'utf8')
+        content = step.change(source)
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error)
+        await fail(at, `${step.display} failed in ${path}/.`, 1, reason)
+        return
+      }
+      if (content !== source) await writeFile(step.file, content)
+      output.did(label)
+    } else {
+      output.note(label)
+      const result = await context.exec(step.command, step.args, {
+        cwd: step.cwd,
+      })
+      if (result.code !== 0) {
+        await fail(
+          at,
+          `${step.display} failed in ${path}/ with exit code ${result.code}.`,
+          result.code,
+          result.output.trimEnd()
+        )
       }
     }
-
-    // The record is written once the module is wholly done, so a remove
-    // never undoes something an add did not finish.
-    await plan.settle?.()
-    let modules = (config.modules ?? []).filter(
-      (entry) => entry.name !== plan.module.name
-    )
-    if (plan.record) modules = [...modules, plan.record]
-    for (const { to, path, record } of plan.handOver) {
-      modules = modules.map((entry) =>
-        entry.name === to
-          ? { ...entry, backend: withBackend(entry.backend, path, record) }
-          : entry
-      )
-    }
-    const rest: ProjectConfig = { ...config }
-    delete rest.modules
-    config = modules.length > 0 ? { ...rest, modules } : rest
-    await writeProjectConfig(project.root, config)
+    step.done = true
   }
+
+  await plan.settle?.()
+  await writeRecord(plan, project, true)
 }

@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { isRecord } from '../validate.js'
 import type { KindAdapter, PackageVersion } from './adapter.js'
-import { moduleProblem } from './drupal-fields.js'
+import { moduleProblem, recordProblem } from './drupal-fields.js'
 import { planBackendAdd, planBackendRemove } from './drupal-modules.js'
 import { readJsonObject, stringMap } from './read-json.js'
 
@@ -43,6 +43,7 @@ export const drupalAdapter: KindAdapter = {
   },
 
   moduleProblem,
+  recordProblem,
 
   async packages(dir) {
     const requires = await required(dir)
