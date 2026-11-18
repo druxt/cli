@@ -312,6 +312,8 @@ interface Plan {
   engine: EngineChoice | undefined
   dir: string
   target: string
+  /** True when the directory holds files already, which are the user's. */
+  held: boolean
   install: boolean
 }
 
@@ -336,7 +338,9 @@ function summary(plan: Plan, options: InitOptions, output: Output): string[] {
       rows.push(
         options.keepEngines
           ? ['Keep', 'the files of every engine']
-          : ['Remove', 'the files of the other engines']
+          : plan.held
+            ? ['Keep', 'the files of every engine: the directory is not empty']
+            : ['Remove', 'the files of the other engines']
       )
     }
     const where = entry.druxt.backendUrl
@@ -412,6 +416,8 @@ async function plan(
         })
       : (defaultDir ?? (entry as StarterEntry).name))
   const target = targetDirectory(context.cwd, dir, options.force)
+  // Looked at before the download, which fills the directory.
+  const held = existsSync(target) && readdirSync(target).length > 0
 
   entry ??= await askStarter(registry, names, context)
   const layout = await chooseLayout(entry, options, context, canAsk)
@@ -425,7 +431,7 @@ async function plan(
         })
       : false)
 
-  return { entry, layout, engine, dir, target, install }
+  return { entry, layout, engine, dir, target, held, install }
 }
 
 async function runInit(
@@ -532,9 +538,7 @@ async function runInit(
     }
     throw error
   }
-  const { entry, layout, engine, target, install } = settled
-  // Looked at before the download, which fills the directory.
-  const held = existsSync(target) && readdirSync(target).length > 0
+  const { entry, layout, engine, target, held, install } = settled
 
   output.note(`Fetching the ${entry.name} starter from ${entry.tar}.`)
   try {

@@ -78,6 +78,53 @@ async function usage(
   return renderUsage(command, parent)
 }
 
+/** True when an option takes the argument after it as its value. */
+function takesValue(option: string, args: ArgsDef): boolean {
+  if (option.includes('=')) return false
+  const name = option.replace(/^--?/, '')
+  return Object.entries(args).some(([key, definition]) => {
+    if (definition.type !== 'string' && definition.type !== 'enum') return false
+    const alias = 'alias' in definition ? definition.alias : undefined
+    return key === name || [alias ?? []].flat().includes(name)
+  })
+}
+
+/**
+ * The arguments with an option of a group moved to after the command it was
+ * given before, so `module --json list` reads as `module list --json`. citty
+ * hands a command only what follows its name, and an option between a group
+ * and its command would be dropped without a word. The command then takes
+ * the option or refuses it, as it does one given after its name. The options
+ * of `drx` itself stay where they are.
+ */
+function optionsAfterCommand(main: CommandDef, argv: string[]): string[] {
+  const head: string[] = []
+  let rest = argv
+  for (let command = main; ;) {
+    const subCommands = command.subCommands as
+      Record<string, CommandDef> | undefined
+    if (!subCommands) break
+    const args = (command.args ?? {}) as ArgsDef
+    let index = 0
+    while (rest[index]?.startsWith('-') && rest[index] !== '--') {
+      index += takesValue(rest[index] as string, args) ? 2 : 1
+    }
+    const name = rest[index]
+    const next = name === undefined ? undefined : subCommands[name]
+    if (name === undefined || !next) break
+    const options = rest.slice(0, index)
+    if (command === main) {
+      head.push(...options, name)
+      rest = rest.slice(index + 1)
+    } else {
+      head.push(name)
+      rest = [...options, ...rest.slice(index + 1)]
+    }
+    command = next
+  }
+  return [...head, ...rest]
+}
+
 /** The code and message to report for anything a command throws. */
 function describe(error: unknown): { code: string; message: string } {
   if (error instanceof DrxError) {
@@ -145,7 +192,7 @@ async function execute(argv: string[], context: CliContext): Promise<number> {
       stderr.write(`${plain(stderr, await renderUsage(main))}\n`)
       return 1
     }
-    await runCommand(main, { rawArgs: argv })
+    await runCommand(main, { rawArgs: optionsAfterCommand(main, argv) })
     return 0
   } catch (error) {
     const failure = describe(error)

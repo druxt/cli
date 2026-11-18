@@ -75,7 +75,7 @@ An engine is a way to run the site's backend on your machine. The starter lists 
 - The prompt lists the engines whose commands are installed first, and marks the others as not installed. You can still choose one of those. `init` then warns which commands are missing, and creates the site.
 - With `--yes` or no terminal, the engine is the first whose commands are all installed, or the starter's first when none is.
 - `init` removes the files of the engines you did not choose, so a DDEV site has no `.lando.yml`. `--keep-engines` leaves them all.
-- **`--force` into a project that exists.** `--force` writes the starter's files into a directory that holds files, and a file the starter also has is replaced by the starter's. It deletes nothing. The files of the engines you did not choose stay, since any of them may be your own. `init` warns with their paths. Commit or copy the project first.
+- **`--force` into a project that exists.** `--force` writes the starter's files into a directory that holds files, and a file the starter also has is replaced by the starter's. It deletes nothing. The files of the engines you did not choose stay, since any of them may be your own. `init` warns with their paths, and a guided run says so in its summary before it asks. Commit or copy the project first.
 - For an engine that serves the backend at a fixed URL, and for `none`, `init` writes the URL where the starter reads it. For the quickstart that is `BASE_URL` in `.env`.
 - What the site needs and the steps to run next are the chosen engine's.
 - An engine or a database the starter does not offer fails, with the names it does offer.
@@ -124,6 +124,8 @@ The Druxt version compared is the one installed in the part, or the range the pa
 | `--module-registry <url>` | A module registry: a URL, or a name from the user configuration |
 | `--refresh`               | Read the registry again even when the cached copy is fresh      |
 | `--json`                  | Print the result as JSON on stdout                              |
+
+An option of a `drx module` command goes before or after the command's name: `drx module --json list` is `drx module list --json`.
 
 ### `drx module search <text>`
 
