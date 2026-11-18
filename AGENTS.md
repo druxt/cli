@@ -34,6 +34,9 @@ The Druxt command-line tool: `@druxt/cli`, with the binary `drx`, and `create-dr
 - **Prose is linted with Vale.** It covers the markdown a change touches, its
   commit messages and the merge request description.
   `npm run lint:prose:install` once, then `npm run lint:prose`.
+- **A change a user of a package would notice carries a changeset**
+  (`npm run changeset`). Do not write a package's `CHANGELOG.md` by hand: the
+  release writes it from `.changeset/`, through `.changeset/changelog.cjs`.
 - **Nothing here publishes to npm.** There is no publish job in either
   pipeline. Do not add one that would run without a token.
 
@@ -46,6 +49,7 @@ The Druxt command-line tool: `@druxt/cli`, with the binary `drx`, and `create-dr
 | `packages/cli/src/registry/` | Reading and checking the starter registry                          |
 | `packages/create-druxt/`     | `create-druxt`, which runs `drx init`                              |
 | `starters/`                  | The public starter registry. The build copies it into `@druxt/cli` |
+| `.changeset/`                | Pending release notes, and the generator that writes the changelog |
 | `scripts/`                   | Repository tooling, excluded from the packages                     |
 | `test/`                      | Tests of the repository tooling                                    |
 | `.githooks/`                 | Committed hooks, enabled by `npm install`                          |
@@ -68,4 +72,6 @@ npm run lint:prose   # Vale, after `npm run lint:prose:install`
 Pinned in `.mise.toml`. The packages are TypeScript, built with `tsc` and no
 bundler, as ES modules. `c12` stays on 3 while 4 is a release candidate, and
 `typescript` stays on 6 until `typescript-eslint` supports 7. Renovate is
-configured not to offer either.
+configured not to offer either. `markdown-it`, which the changelog generator
+reads a changeset with, stays on 14: from 15 it no longer takes
+`www.example.org` for a URL, and an issue number in one would be linked.
