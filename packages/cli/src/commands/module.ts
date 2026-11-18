@@ -341,8 +341,25 @@ function repositoryUrl(module: ModuleEntry): string {
   return module.path ? `${base}/tree/HEAD/${module.path}` : base
 }
 
+/**
+ * Whether each backend module a module needs is part of core: true, false,
+ * or null when the registry does not say. A registry that marks any module as
+ * core is taken to mark them all, so in one that does, a module with no mark
+ * is not core.
+ */
+function backendReport(module: ModuleEntry, registry: ModuleEntry[]) {
+  const marked = registry.some((entry) =>
+    entry.backend.some((needed) => needed.core)
+  )
+  return module.backend.map((needed) => ({
+    ...needed,
+    core: needed.core ?? (marked ? false : null),
+  }))
+}
+
 function infoText(
   module: ModuleEntry,
+  backend: ReturnType<typeof backendReport>,
   project: ModuleProject | undefined,
   states: ModuleInPart[],
   output: Output
@@ -366,13 +383,13 @@ function infoText(
     ''
   )
 
-  if (module.backend.length === 0) {
+  if (backend.length === 0) {
     lines.push('Backend modules it needs: none listed.')
   } else {
     lines.push(
       'Backend modules it needs:',
       ...columns(
-        module.backend.map((needed) => [
+        backend.map((needed) => [
           needed.kind,
           needed.name,
           needed.label,
@@ -381,6 +398,9 @@ function infoText(
         '  '
       )
     )
+    if (backend.some((needed) => needed.core === null)) {
+      lines.push('The registry does not say which of these are part of core.')
+    }
   }
 
   for (const [index, state] of states.entries()) {
@@ -456,6 +476,7 @@ async function showModule(
 ): Promise<void> {
   const project = await moduleProject(context.cwd)
   const states = project ? await project.state(module) : []
+  const backend = backendReport(module, loaded.modules)
   output.result(
     {
       registry: registryReport(loaded),
@@ -464,11 +485,11 @@ async function showModule(
         ...rowReport(module),
         repository: repositoryUrl(module),
         ...(module.website ? { website: module.website } : {}),
-        backend: module.backend,
+        backend,
         ...(project ? { parts: states } : {}),
       },
     },
-    infoText(module, project, states, output)
+    infoText(module, backend, project, states, output)
   )
 }
 
@@ -509,7 +530,7 @@ function notAvailable(name: string, description: string) {
     run() {
       throw new DrxError(
         'not-available',
-        `drx module ${name} is not available yet. This version can list, search and show modules.`
+        `drx module ${name} is not available yet. Run "drx module --help" for the commands this version has.`
       )
     },
   })

@@ -11,8 +11,11 @@ export interface BackendModule {
   /** The machine name of the module. */
   name: string
   label: string
-  /** True when the backend ships the module itself. */
-  core: boolean
+  /**
+   * Whether the backend ships the module itself, as the registry states it.
+   * Undefined when the registry does not say.
+   */
+  core?: boolean
   url?: string
 }
 
@@ -84,11 +87,13 @@ function backendModules(raw: Raw, at: string): BackendModule[] {
       const here = `${at}.${kind}[${index}]`
       if (!isRecord(item)) throw new Invalid(`${here} must be an object`)
       const url = optionalString(item, 'url', here)
+      // Checked for its type, and kept only when it is there.
+      const core = optionalBoolean(item, 'core', here)
       modules.push({
         kind,
         name: requiredString(item, 'name', here),
         label: requiredString(item, 'label', here),
-        core: optionalBoolean(item, 'core', here),
+        ...(item.core === undefined ? {} : { core }),
         ...(url === undefined ? {} : { url }),
       })
     }

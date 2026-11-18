@@ -268,6 +268,37 @@ describe('drx module info', () => {
     expect(result.stdout).toContain('  drupal  block  Block  (core)')
   })
 
+  test('core is unknown when the registry marks no module as core', async () => {
+    // The registry as it is published: no entry says which modules are core.
+    const registry = moduleRegistry()
+    for (const module of registry.modules) {
+      for (const need of (module.drupal ?? []) as Record<string, unknown>[]) {
+        delete need.core
+      }
+    }
+    server.files['/modules.json'] = JSON.stringify(registry)
+
+    const json = await drx(['module', 'info', 'blocks', '--json'])
+    expect(JSON.parse(json.stdout).module.backend).toEqual([
+      { kind: 'drupal', name: 'block', label: 'Block', core: null },
+    ])
+    const text = await drx(['module', 'info', 'blocks'])
+    expect(text.stdout).toContain(
+      [
+        'Backend modules it needs:',
+        '  drupal  block  Block',
+        'The registry does not say which of these are part of core.',
+      ].join('\n')
+    )
+  })
+
+  test('a module is not core when the registry marks the ones that are', async () => {
+    const result = await drx(['module', 'info', 'auth', '--json'])
+    expect(JSON.parse(result.stdout).module.backend[0].core).toBe(false)
+    const text = await drx(['module', 'info', 'auth'])
+    expect(text.stdout).not.toContain('The registry does not say')
+  })
+
   test('says what a module lacks', async () => {
     const ckeditor = await drx(['module', 'info', 'ckeditor'])
     expect(ckeditor.stdout).toContain('Package     not published')
@@ -437,7 +468,7 @@ describe('the module commands that are not built', () => {
       const result = await drx(['module', command, 'blocks', '--json'])
       expect(result.code).toBe(1)
       expect(result.stderr).toContain(
-        `drx module ${command} is not available yet. This version can list, search and show modules.`
+        `drx module ${command} is not available yet. Run "drx module --help" for the commands this version has.`
       )
       expect(JSON.parse(result.stdout).error.code).toBe('not-available')
       expect(server.requests).toEqual([])
