@@ -10,6 +10,14 @@ export interface PackageVersion {
   installed: string | null
 }
 
+/** A field that is not in the form it has to be, and what that form is. */
+export interface FieldProblem {
+  /** The field, as a path from the value that was checked. */
+  field: string
+  /** What it must be, to follow the field's name in a message. */
+  must: string
+}
+
 /**
  * Everything the CLI knows about one kind of part. The commands call this
  * interface and never a kind by name, so a new kind is a new file in this
@@ -21,6 +29,12 @@ export interface KindAdapter {
   readonly role: Role
   /** True when the directory holds a part of this kind. */
   detect(dir: string): Promise<boolean>
+  /**
+   * What is wrong with a module a registry lists for this kind, or undefined.
+   * The values of one reach the tools of the part as arguments, so each is
+   * checked by its pattern where it is read, before any command is built.
+   */
+  moduleProblem?(module: { name: string }): FieldProblem | undefined
   /** The packages `info` reports for a part of this kind. */
   packages(dir: string): Promise<PackageVersion[]>
   /**
