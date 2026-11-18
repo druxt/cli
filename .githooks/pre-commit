@@ -6,4 +6,6 @@
 set -e
 npm run --silent lint
 npm run --silent typecheck
-npm test --silent
+# Git sets GIT_DIR and GIT_INDEX_FILE for a hook. The tests make repositories of
+# their own, and with those set their commits would land in this one.
+env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX npm test --silent
