@@ -1,18 +1,35 @@
 import { stripVTControlCharacters } from 'node:util'
-import { defineCommand, renderUsage, runCommand, type CommandDef } from 'citty'
+import {
+  defineCommand,
+  renderUsage,
+  runCommand,
+  type ArgsDef,
+  type CommandDef,
+} from 'citty'
 import { infoCommand } from './commands/info.js'
 import { initCommand } from './commands/init.js'
+import { runMenu } from './commands/menu.js'
 import { moduleCommand } from './commands/module.js'
 import { defaultContext, type CliContext, type TextStream } from './context.js'
 import { DrxError } from './errors.js'
+import { createOutput } from './output.js'
 import { cliVersion } from './package-root.js'
 
-function mainCommand(context: CliContext) {
-  return defineCommand({
+function mainCommand(context: CliContext): CommandDef {
+  return defineCommand<ArgsDef>({
     meta: {
       name: 'drx',
       version: cliVersion(),
       description: 'The Druxt command-line tool',
+    },
+    args: {
+      interactive: {
+        type: 'boolean',
+        default: true,
+        description: 'Ask for what is missing when there is a terminal',
+        negativeDescription:
+          'Never ask, draw or wait: for CI and scripts. DRX_NO_INTERACTIVE=1 does the same',
+      },
     },
     subCommands: {
       init: initCommand(context),
@@ -67,17 +84,31 @@ function describe(error: unknown): { code: string; message: string } {
   }
 }
 
+/** The flag that turns every prompt off. It goes before or after a command. */
+const NO_INTERACTIVE = '--no-interactive'
+
 /**
- * Runs the CLI with the given arguments and returns the exit code. It never
- * exits the process or throws, so a caller decides what to do with the code.
+ * Whether anything may be asked. A terminal is needed, and `CI`,
+ * `DRX_NO_INTERACTIVE` and `--no-interactive` each say no whatever the
+ * terminal is. A command then takes its defaults, and fails naming the flag
+ * of a value that has none.
  */
-export async function runCli(
-  argv: string[],
-  overrides: Partial<CliContext> = {}
-): Promise<number> {
-  const context = { ...defaultContext(), ...overrides }
+function mayAsk(context: CliContext, argv: string[]): boolean {
+  const off = (value: string | undefined) =>
+    value !== undefined && value !== '' && value !== '0' && value !== 'false'
+  return (
+    context.interactive &&
+    !argv.includes(NO_INTERACTIVE) &&
+    !off(context.env.DRX_NO_INTERACTIVE) &&
+    !off(context.env.CI)
+  )
+}
+
+/** Runs one command line in a context that is already settled. */
+async function execute(argv: string[], context: CliContext): Promise<number> {
   const main = mainCommand(context)
   const { stdout, stderr } = context
+  const json = argv.includes('--json')
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
@@ -88,7 +119,13 @@ export async function runCli(
       stdout.write(`${cliVersion()}\n`)
       return 0
     }
-    if (argv.length === 0) {
+    // Bare `drx`: a menu for a person, the usage for anything else.
+    if (argv.every((argument) => argument === '--no-banner')) {
+      if (context.interactive) {
+        return await runMenu(context, { banner: argv.length === 0 }, (next) =>
+          execute(next, context)
+        )
+      }
       stderr.write(`${plain(stderr, await renderUsage(main))}\n`)
       return 1
     }
@@ -96,12 +133,30 @@ export async function runCli(
     return 0
   } catch (error) {
     const failure = describe(error)
-    if (argv.includes('--json')) {
+    if (json) {
       stdout.write(
         `${JSON.stringify({ ok: false, error: failure }, null, 2)}\n`
       )
     }
-    stderr.write(`Error: ${failure.message}\n`)
+    // In a terminal the line carries the mark for a failure. The word stays.
+    const output = createOutput(context, json)
+    const mark = output.decorated ? `${output.err.mark('failed')} ` : ''
+    stderr.write(`${mark}Error: ${failure.message}\n`)
     return 1
   }
+}
+
+/**
+ * Runs the CLI with the given arguments and returns the exit code. It never
+ * exits the process or throws, so a caller decides what to do with the code.
+ */
+export async function runCli(
+  argv: string[],
+  overrides: Partial<CliContext> = {}
+): Promise<number> {
+  const context = { ...defaultContext(), ...overrides }
+  return execute(
+    argv.filter((argument) => argument !== NO_INTERACTIVE),
+    { ...context, interactive: mayAsk(context, argv) }
+  )
 }

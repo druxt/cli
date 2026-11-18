@@ -22,6 +22,8 @@ export interface UserConfig {
   /** Module registries by name, for `--module-registry`. */
   moduleRegistries: Record<string, string>
   sources: Record<string, SourceDefinition>
+  /** False to never draw the wordmark. */
+  banner?: boolean
 }
 
 type Env = Record<string, string | undefined>
@@ -44,6 +46,10 @@ function configProblem(config: unknown): string | undefined {
         return `${key}.${name} must be an http or https URL`
       }
     }
+  }
+
+  if (config.banner !== undefined && typeof config.banner !== 'boolean') {
+    return 'banner must be true or false'
   }
 
   const sources = config.sources ?? {}
@@ -103,6 +109,7 @@ export async function loadUserConfig(env: Env): Promise<UserConfig> {
     registries: config.registries ?? {},
     moduleRegistries: config.moduleRegistries ?? {},
     sources: config.sources ?? {},
+    ...(config.banner === undefined ? {} : { banner: config.banner }),
   }
 }
 

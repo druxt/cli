@@ -82,6 +82,7 @@ function answering(answers: Record<string, unknown>) {
     return answers[message]
   }
   const prompter: Prompter = {
+    search: async ({ message, choices }) => answer(message, choices) as never,
     text: async ({ message }) => answer(message) as string,
     select: async ({ message, choices }) => answer(message, choices) as never,
     confirm: async ({ message }) => answer(message) as boolean,
@@ -412,6 +413,7 @@ describe('drx init at a terminal with engines', () => {
   const base = {
     'Which layout?': 'monorepo',
     'Install its dependencies now?': false,
+    'Create the site?': true,
   }
 
   test('lists the installed engines first, marks the others, and ends with none', async () => {
@@ -442,6 +444,7 @@ describe('drx init at a terminal with engines', () => {
       'Which layout?',
       'How should the backend run?',
       'Install its dependencies now?',
+      'Create the site?',
     ])
   })
 
@@ -494,6 +497,7 @@ describe('drx init at a terminal with engines', () => {
     expect(asked.map(({ message }) => message)).toEqual([
       'Which layout?',
       'Install its dependencies now?',
+      'Create the site?',
     ])
   })
 })

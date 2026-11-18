@@ -62,6 +62,36 @@ describe('terminalPrompter', () => {
     ).toBe('split')
   })
 
+  test('search narrows the list by what is typed', async () => {
+    const { prompter, press } = terminal()
+    press(`men${ENTER}`)
+    expect(
+      await prompter.search({
+        message: 'Which module?',
+        choices: [
+          { value: 'blocks', label: 'blocks' },
+          { value: 'menu', label: 'menu', hint: 'druxt-menu' },
+        ],
+      })
+    ).toBe('menu')
+  })
+
+  test('select shows a choice that cannot be taken, and skips it', async () => {
+    const { prompter, press, drawn } = terminal()
+    press(`${DOWN}${ENTER}`)
+    expect(
+      await prompter.select({
+        message: 'Which layout?',
+        choices: [
+          { value: 'monorepo', label: 'monorepo' },
+          { value: 'split', label: 'split', hint: 'not yet', disabled: true },
+          { value: 'other', label: 'other' },
+        ],
+      })
+    ).toBe('other')
+    expect(drawn()).toContain('split')
+  })
+
   test('confirm returns the initial answer on enter', async () => {
     const { prompter, press } = terminal()
     press(ENTER)

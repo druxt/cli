@@ -47,18 +47,19 @@ Creates a site from a starter in a registry, writes `drx.config.json` at its roo
 | `--base-url <url>`          | With `--engine none`: the URL of the backend                                                                | Asked for                                                   |
 | `--keep-engines`            | Keep the files of the engines that were not chosen                                                          | Remove them                                                 |
 | `--setup`                   | Run the engine's steps after creating the site. Not available yet.                                          |                                                             |
+| `--no-banner`               | Do not draw the wordmark at the start of a guided run                                                       | Draw it                                                     |
 | `--install`, `--no-install` | Install the site's dependencies after creating it, or do not                                                | Asked for, or no                                            |
 | `--force`                   | Write into a directory that exists and is not empty                                                         | Refuse                                                      |
 | `--yes`, `-y`               | Accept the default for everything not given, and ask nothing                                                |                                                             |
 | `--json`                    | Print the result as JSON on stdout                                                                          |                                                             |
 
-At a terminal, `init` asks for the directory, the starter when the registry has more than one, the layout, the engine and its database when the starter gives a choice, and whether to install. A flag answers each question, so the command runs unattended:
+At a terminal, `init` is a guided run. It asks for whatever the flags left out, then shows a summary and waits for a yes before it writes. See [At a terminal](#at-a-terminal). A flag answers each question, so the command runs unattended:
 
 ```bash
 npx @druxt/cli init my-site --yes --json
 ```
 
-With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither.
+With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither. See [CI and scripts](#ci-and-scripts).
 
 #### Engines
 
@@ -127,6 +128,10 @@ The Druxt version compared is the one installed in the part, or the range the pa
 
 The same table, for the modules whose name, package name or description contains the text. Case is ignored. It takes the options of `drx module list`.
 
+### `drx module`
+
+With no command, at a terminal: a list of the modules that narrows as you type. Pick one and it is shown as `drx module info` shows it. Anywhere else it fails and names the commands.
+
 ### `drx module info <name>`
 
 Shows one module, found by its registry name or its package name: the package, type, status, category, Druxt range, repository and website, and the backend modules it needs, with the ones that are part of Drupal core marked. Inside a project it adds the installed version and the compatibility. It takes `--module-registry`, `--refresh` and `--json`.
@@ -142,6 +147,84 @@ Usage for the CLI or one command, and the version.
 - The result of a command goes to stdout: text, or one JSON document with `--json`.
 - Progress, warnings, errors and prompts go to stderr.
 - A command that fails exits with 1. With `--json` it also prints `{ "ok": false, "error": { "code", "message" } }` on stdout.
+
+## At a terminal
+
+`drx` with no command opens a menu when a person is at the terminal. It names the project you are in, which it reads from `drx.config.json`. Below that are the actions for where you are:
+
+- Outside a project: create a site.
+- Inside one: list, search or show modules, and show the project. Adding, removing and configuring a module and managing patches are listed as not available yet.
+
+Each entry runs the command it stands for, so the menu and the commands cannot differ.
+
+`drx init` with values missing is a guided run:
+
+1. It asks for the directory, the starter when the registry has more than one, the layout, the engine with its database or URL, and whether to install.
+2. It lists what it will do, from the directory it will create to the files it will remove.
+3. It asks before it writes. Answer no, or press Ctrl-C at any prompt, and nothing has been written. The exit code is 1.
+
+Every run that asked for something ends with the command that repeats it, with each choice as a flag:
+
+```text
+Repeat this with: drx init my-site --starter quickstart --layout monorepo --engine ddev --database mariadb --no-install --yes
+```
+
+### The wordmark and the header
+
+The Druxt wordmark is drawn in two places only: at the start of a guided `init`, and above the menu. Other commands that print a report start with one line, `druxt` and the version. Both go to stderr.
+
+The wordmark is not drawn with `--json`, without a terminal, under `CI`, or in a terminal narrower than its 58 columns. To turn it off yourself:
+
+- `--no-banner` on `drx` or `drx init`, for one run.
+- `"banner": false` in the [user configuration](#the-user-configuration), for every run.
+
+### Colour and marks
+
+Blue is the backend and green is the frontend: the wordmark runs from one to the other, and a part is printed in the colour of its role wherever parts are listed. The role is always there in words too. Each line on stderr starts with a mark, and the marks differ in shape as well as colour. A running step has one, a finished step another, and a warning and a failure have their own. `Warning:` and `Error:` are spelled out beside them.
+
+| Setting              | What it does                                                              |
+| -------------------- | ------------------------------------------------------------------------- |
+| `NO_COLOR=1`         | No colour anywhere. It wins over `FORCE_COLOR`                            |
+| `FORCE_COLOR=1`      | Colour with no terminal. `2` is 256 colours and `3` is 24-bit, `0` is off |
+| `--json`             | Plain text, without marks or the wordmark                                 |
+| No terminal, or `CI` | Plain text, without marks or the wordmark                                 |
+
+A terminal with 16 colours gets its own blue and green. One that cannot draw Unicode gets `*`, `+`, `!` and `x` for the marks.
+
+## CI and scripts
+
+The CLI never asks anything when nobody is there to answer. Each of these is enough:
+
+| Condition              | How                                              |
+| ---------------------- | ------------------------------------------------ |
+| No terminal            | stdin or stderr is not a terminal                |
+| `CI` is set            | Most CI services set it                          |
+| `DRX_NO_INTERACTIVE=1` | For a script run from a terminal                 |
+| `--no-interactive`     | The same, as a flag, before or after the command |
+| `--json`               | The command prints JSON and asks nothing         |
+
+Prompts, the menu, the wordmark and animation are then all off. A value with a default takes it, and a value with none fails with a message naming the flag to pass. Bare `drx` prints its usage. `--yes` accepts the defaults and can be combined with any of them. `init` needs it only when no directory is given.
+
+A complete unattended `init`:
+
+```bash
+npx @druxt/cli init my-site \
+  --starter quickstart \
+  --layout monorepo \
+  --engine ddev \
+  --no-install \
+  --no-interactive \
+  --json > result.json
+```
+
+stdout is the JSON result and nothing else. stderr has one plain line per step.
+
+| Exit code | Meaning                                    |
+| --------- | ------------------------------------------ |
+| `0`       | The command did what it was asked          |
+| `1`       | It did not. The message on stderr says why |
+
+With `--json`, a failure prints `{ "ok": false, "error": { "code", "message" } }` on stdout, and `code` says which kind it was: `usage`, `not-available`, `registry`, `invalid-entry`, `unknown-starter`, `unknown-source`, `unknown-module`, `directory-not-empty`, `config`, `download`, `install` or `cancelled`.
 
 ## The project configuration
 
@@ -300,6 +383,7 @@ The copy is kept in `~/.cache/drx`, or under `XDG_CACHE_HOME` when that is set. 
   "registries": {
     "team": "https://example.com/starters"
   },
+  "banner": false,
   "moduleRegistries": {
     "team": "https://example.com/modules.json"
   },
@@ -312,6 +396,7 @@ The copy is kept in `~/.cache/drx`, or under `XDG_CACHE_HOME` when that is set. 
 
 - `--registry team` reads starters from that URL. `GIGET_AUTH` is giget's own variable, and giget sends it as a bearer token with every tarball it downloads. The CLI also sends it to a registry you name, and never to the public registry.
 - `--module-registry team` reads modules from that URL, with `GIGET_AUTH` sent to it in the same way.
+- `"banner": false` stops the wordmark being drawn.
 - `--source` takes `npm`, `git:<url>#<ref>`, or a name defined here. Only `npm` creates a site in this version. The others are read and answer that they are not available yet.
 
 ## Not there yet

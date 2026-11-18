@@ -4,7 +4,7 @@ import { defineCommand, type ArgsDef } from 'citty'
 import { adapterFor, type PackageVersion } from '../adapters/index.js'
 import { assertKnownOptions } from '../args.js'
 import type { CliContext } from '../context.js'
-import { columns, createOutput } from '../output.js'
+import { columns, createOutput, type Output } from '../output.js'
 import { cliVersion } from '../package-root.js'
 import type { Part } from '../parts.js'
 import {
@@ -46,9 +46,10 @@ async function reportPart(root: string, part: Part): Promise<PartReport> {
   }
 }
 
-function partLines(part: PartReport): string[] {
+function partLines(part: PartReport, output: Output): string[] {
   const heading = [
-    `${part.role}  ${part.kind}  ${part.path}/`,
+    // The role is in words and in its colour: blue backend, green frontend.
+    output.out.role(part.role, `${part.role}  ${part.kind}  ${part.path}/`),
     ...columns(
       [
         ...(part.engine ? [['Engine', part.engine]] : []),
@@ -82,7 +83,7 @@ function partLines(part: PartReport): string[] {
   return [...heading, ...columns(rows, '  ')]
 }
 
-function text(report: InfoReport, cwd: string): string {
+function text(report: InfoReport, cwd: string, output: Output): string {
   const lines = columns([
     ['drx', report.cli.version],
     ['Node', report.node],
@@ -105,7 +106,7 @@ function text(report: InfoReport, cwd: string): string {
     ])
   )
   for (const part of project.parts) {
-    lines.push('', ...partLines(part))
+    lines.push('', ...partLines(part, output))
   }
   return lines.join('\n')
 }
@@ -128,6 +129,7 @@ export function infoCommand(context: CliContext) {
     async run({ args: parsed, rawArgs }) {
       assertKnownOptions(rawArgs, args, 'info')
       const output = createOutput(context, parsed.json === true)
+      output.header()
 
       const report: InfoReport = {
         cli: { name: '@druxt/cli', version: cliVersion() },
@@ -143,7 +145,7 @@ export function infoCommand(context: CliContext) {
         }
         report.project = { root, ...config, parts }
       }
-      output.result(report, text(report, context.cwd))
+      output.result(report, text(report, context.cwd, output))
     },
   })
 }
