@@ -18,5 +18,8 @@ Changes to the repository that are in no package, such as its pipelines, are rec
   git hooks, linting, a GitLab pipeline and a GitHub Actions workflow, secret scanning with a
   detection canary, a private-host check, an attribution check and prose linting.
 - The starter registry under `starters/`, with one entry, `quickstart`.
+- A release workflow, which keeps a pull request open that versions the packages, and publishes
+  them when it is merged. `RELEASING.md` describes it.
+- A changelog generator, a check that runs before a publish, and CodeQL analysis.
 
 [Unreleased]: https://github.com/druxt/cli/commits/0.x
