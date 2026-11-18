@@ -145,8 +145,14 @@ lint:commit:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
   script:
     - section_start "commitlint" "Validating commit messages"
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - npm run lint:commit -- --from "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --to HEAD --verbose
+    # The base and the head GitLab gives the merge request, not the target
+    # branch fetched by name: a merge request from a fork runs in the fork,
+    # which may have no branch of that name. The base is an ancestor of the
+    # head, so the full clone holds it. A merged results pipeline checks out a
+    # merge commit, with the target's newer commits behind it, and names the
+    # source branch's own head in a variable that is empty otherwise.
+    - git cat-file -e "${CI_MERGE_REQUEST_DIFF_BASE_SHA}^{commit}"
+    - npm run lint:commit -- --from "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --to "${CI_MERGE_REQUEST_SOURCE_BRANCH_SHA:-HEAD}" --verbose
     - section_end "commitlint"
 
 # The work is the author's. No commit, merge request description or tracked
