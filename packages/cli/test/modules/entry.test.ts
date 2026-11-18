@@ -24,7 +24,6 @@ describe('parseModuleRegistry', () => {
           kind: 'drupal',
           name: 'simple_oauth',
           label: 'Simple OAuth',
-          core: false,
           url: 'https://www.drupal.org/project/simple_oauth',
         },
       ],
@@ -33,6 +32,20 @@ describe('parseModuleRegistry', () => {
     expect(blocks?.druxt).toBe('^0.25.1')
     expect(blocks?.backend).toEqual([
       { kind: 'drupal', name: 'block', label: 'Block', core: true },
+    ])
+  })
+
+  test('keeps core as the registry states it, and absent when it does not', () => {
+    const registry = moduleRegistryWith(0, (module) => {
+      module.drupal = [
+        { name: 'one', label: 'One', core: false },
+        { name: 'two', label: 'Two' },
+      ]
+    })
+    const [auth] = parseModuleRegistry(registry, AT)
+    expect(auth?.backend).toEqual([
+      { kind: 'drupal', name: 'one', label: 'One', core: false },
+      { kind: 'drupal', name: 'two', label: 'Two' },
     ])
   })
 
@@ -164,7 +177,6 @@ describe('parseModuleRegistry', () => {
         kind: 'drupal',
         name: 'jsonapi_menu',
         label: 'Menu items',
-        core: false,
         composer: { package: 'drupal/jsonapi_menu_items', constraint: '^1.2' },
         setup: [
           {

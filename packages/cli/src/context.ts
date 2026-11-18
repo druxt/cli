@@ -59,6 +59,11 @@ export interface CliContext {
   stderr: TextStream
   /** True when a person is at the terminal to answer a prompt. */
   interactive: boolean
+  /**
+   * The flag or variable that turned the questions off when there is a
+   * terminal to ask on. Undefined when nothing did, or there is none.
+   */
+  questionsOff?: string
   /** The running Node version, without the leading `v`. */
   nodeVersion: string
   now: () => Date
@@ -80,6 +85,11 @@ export interface CliContext {
   exec: RunTool
   /** The file a command name resolves to on PATH, or undefined. */
   findCommand: (name: string) => string | undefined
+  /**
+   * Set by a binary that runs one command under a name of its own, so the
+   * usage of that command is headed by the name the user typed.
+   */
+  startedAs?: { command: string; name: string }
 }
 
 /**

@@ -59,7 +59,7 @@ At a terminal, `init` is a guided run. It asks for whatever the flags left out, 
 npx @druxt/cli init my-site --yes --json
 ```
 
-With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither. See [CI and scripts](#ci-and-scripts).
+With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither. The message names what kept it from asking: no terminal, `--json`, or the flag or variable that turned the questions off. See [CI and scripts](#ci-and-scripts).
 
 #### Engines
 
@@ -84,7 +84,7 @@ npx @druxt/cli init my-site --engine ddev
 npx @druxt/cli init my-site --engine none --base-url https://cms.example.com
 ```
 
-`--install` runs the install of the package manager the starter declares. For the `quickstart` starter that is `npm install`, which also sets up the Drupal backend when PHP and Composer are present.
+`--install` runs the install of the package manager the starter declares. For the `quickstart` starter that is `npm install`, which also sets up the Drupal backend when PHP and Composer are present. The steps printed under "Next" then leave out what the install ran, so nothing is set up twice.
 
 ### `drx info`
 
@@ -180,7 +180,7 @@ With no command, at a terminal: a list of the modules that narrows as you type. 
 
 ### `drx module info <name>`
 
-Shows one module, found by its registry name or its package name: the package, type, status, category, Druxt range, repository and website, and the backend modules it needs, with the ones that are part of Drupal core marked. Inside a project it adds the installed version and the compatibility. It takes `--module-registry`, `--refresh` and `--json`.
+Shows one module, found by its registry name or its package name: the package, type, status, category, Druxt range, repository and website, and the backend modules it needs, with the ones that are part of Drupal core marked. When the registry marks no module as core, the text says so and `core` is `null` in the JSON. It is `false` only in a registry that marks the modules that are core. Inside a project it adds the installed version and the compatibility. It takes `--module-registry`, `--refresh` and `--json`.
 
 A name that matches nothing exits with 1 and prints the closest names.
 
@@ -357,7 +357,11 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
         ],
         "files": ["drupal/.ddev"]
       }
-    ]
+    ],
+    "install": {
+      "runs": ["npm run setup"],
+      "notes": ["npm run dev starts the backend again when it is not running."]
+    }
   }
 }
 ```
@@ -377,6 +381,8 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 | `steps`             | Optional. The commands to run in the new site, in order, when no engine is chosen and for the `none` engine         |
 | `engines`           | Optional. The ways the backend can be run, described below                                                          |
 | `backendUrl`        | Optional. The `file` and `variable` the starter reads its backend URL from, and a `template` to start the file from |
+| `install.runs`      | Optional. The steps the install runs itself, left out of "Next" after one, from an engine's steps too               |
+| `install.notes`     | Optional. Lines printed under "Note" after an install                                                               |
 
 `index.json` is `{ "starters": ["quickstart"] }`.
 

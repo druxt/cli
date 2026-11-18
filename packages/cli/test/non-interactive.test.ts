@@ -128,6 +128,67 @@ describe.each(CONDITIONS)('with $name', (condition) => {
   )
 })
 
+describe('drx init with no directory says why it did not ask', () => {
+  const TAIL =
+    ' Pass a directory, as in "drx init my-site", or --yes to use the default of the starter.'
+  test.each([
+    [
+      '--no-interactive',
+      ['--no-interactive'],
+      {},
+      true,
+      'No directory was given, and --no-interactive turns the questions off.',
+    ],
+    [
+      'DRX_NO_INTERACTIVE=1',
+      [],
+      { DRX_NO_INTERACTIVE: '1' },
+      true,
+      'No directory was given, and DRX_NO_INTERACTIVE turns the questions off.',
+    ],
+    [
+      'CI=true',
+      [],
+      { CI: 'true' },
+      true,
+      'No directory was given, and CI turns the questions off.',
+    ],
+    [
+      '--json',
+      ['--json'],
+      {},
+      true,
+      'No directory was given, and nothing is asked with --json.',
+    ],
+    [
+      'no terminal',
+      [],
+      {},
+      false,
+      'No directory was given and there is no terminal to ask on.',
+    ],
+    [
+      'no terminal and DRX_NO_INTERACTIVE=1',
+      [],
+      { DRX_NO_INTERACTIVE: '1' },
+      false,
+      'No directory was given and there is no terminal to ask on.',
+    ],
+  ] as const)('with %s', async (_name, flag, env, terminal, message) => {
+    const result = await run(
+      ['init', ...flag],
+      {
+        cwd: tmp('drx-cwd-'),
+        env: { XDG_CONFIG_HOME: tmp('drx-config-'), ...env },
+        defaultRegistry: starters.url,
+      },
+      terminal ? { columns: 100 } : undefined
+    )
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain(`Error: ${message}${TAIL}`)
+  })
+})
+
 describe('--no-interactive', () => {
   test('goes before or after the command, and with --yes', async () => {
     for (const argv of [

@@ -50,11 +50,21 @@ function plain(stream: TextStream, text: string): string {
   return stream.isTTY ? text : stripVTControlCharacters(text)
 }
 
+/** The meta of a command, which citty lets be a value, a promise or a function. */
+async function resolveMeta(command: CommandDef) {
+  const { meta } = command
+  return typeof meta === 'function' ? await meta() : await meta
+}
+
 /**
  * The usage of the command the arguments name, or of `drx` itself. A command
  * may hold commands of its own, so the names are followed as far as they go.
  */
-async function usage(main: CommandDef, argv: string[]): Promise<string> {
+async function usage(
+  main: CommandDef,
+  argv: string[],
+  startedAs: CliContext['startedAs']
+): Promise<string> {
   let command = main
   let parent: CommandDef | undefined
   let path = 'drx'
@@ -66,6 +76,10 @@ async function usage(main: CommandDef, argv: string[]): Promise<string> {
     parent = { meta: { name: path } }
     path = `${path} ${name}`
     command = next
+  }
+  if (startedAs && path === `drx ${startedAs.command}`) {
+    const meta = { ...(await resolveMeta(command)), name: startedAs.name }
+    return renderUsage({ ...command, meta })
   }
   return renderUsage(command, parent)
 }
@@ -94,20 +108,20 @@ function describe(error: unknown): { code: string; message: string } {
 const NO_INTERACTIVE = '--no-interactive'
 
 /**
- * Whether anything may be asked. A terminal is needed, and `CI`,
- * `DRX_NO_INTERACTIVE` and `--no-interactive` each say no whatever the
- * terminal is. A command then takes its defaults, and fails naming the flag
- * of a value that has none.
+ * What says nothing may be asked although there is a terminal: `CI`,
+ * `DRX_NO_INTERACTIVE` or `--no-interactive`, each of which says no whatever
+ * the terminal is. A command then takes its defaults, and fails naming the
+ * flag of a value that has none. Undefined when nothing turned the questions
+ * off, or when there is no terminal to ask on in the first place.
  */
-function mayAsk(context: CliContext, argv: string[]): boolean {
-  const off = (value: string | undefined) =>
+function questionsOff(context: CliContext, argv: string[]): string | undefined {
+  const on = (value: string | undefined) =>
     value !== undefined && value !== '' && value !== '0' && value !== 'false'
-  return (
-    context.interactive &&
-    !argv.includes(NO_INTERACTIVE) &&
-    !off(context.env.DRX_NO_INTERACTIVE) &&
-    !off(context.env.CI)
-  )
+  if (!context.interactive) return undefined
+  if (argv.includes(NO_INTERACTIVE)) return NO_INTERACTIVE
+  if (on(context.env.DRX_NO_INTERACTIVE)) return 'DRX_NO_INTERACTIVE'
+  if (on(context.env.CI)) return 'CI'
+  return undefined
 }
 
 /** Runs one command line in a context that is already settled. */
@@ -118,7 +132,9 @@ async function execute(argv: string[], context: CliContext): Promise<number> {
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
-      stdout.write(`${plain(stdout, await usage(main, argv))}\n`)
+      stdout.write(
+        `${plain(stdout, await usage(main, argv, context.startedAs))}\n`
+      )
       return 0
     }
     if (argv.length === 1 && ['--version', '-v'].includes(argv[0] ?? '')) {
@@ -161,8 +177,13 @@ export async function runCli(
   overrides: Partial<CliContext> = {}
 ): Promise<number> {
   const context = { ...defaultContext(), ...overrides }
+  const off = questionsOff(context, argv)
   return execute(
     argv.filter((argument) => argument !== NO_INTERACTIVE),
-    { ...context, interactive: mayAsk(context, argv) }
+    {
+      ...context,
+      interactive: context.interactive && off === undefined,
+      ...(off === undefined ? {} : { questionsOff: off }),
+    }
   )
 }
