@@ -183,6 +183,9 @@ lint:prose:
 # --- Test ---
 #
 
+# No network: the tests serve their own registry and tarball from a loopback
+# port. The coverage floor in vitest.config.ts is what fails this job when
+# coverage drops.
 test:unit:
   extends: .node
   stage: test
@@ -200,6 +203,39 @@ test:unit:
     expire_in: 1 week
   # Puts the coverage percentage in the merge request widget.
   coverage: '/All files\s*\|\s*([\d.]+)/'
+
+# A published install reads each package's files allowlist and links its
+# binaries. The unit tests read the sources and do neither, so this is the job
+# that proves the packages a user downloads can be installed and run.
+test:pack:
+  extends: .node
+  stage: test
+  needs: []
+  script:
+    - section_start "build" "Building both packages"
+    - npm run build
+    - section_end "build"
+    - section_start "pack" "Packing and installing the tarballs"
+    - mkdir -p "$CI_PROJECT_DIR/pack-check"
+    - npm pack --workspaces --pack-destination "$CI_PROJECT_DIR/pack-check"
+    - cd "$CI_PROJECT_DIR/pack-check" && npm init -y > /dev/null
+    - npm install ./druxt-cli-*.tgz ./create-druxt-*.tgz --no-audit --no-fund
+    - test "$(./node_modules/.bin/drx --version)" = "$(node -p "require('$CI_PROJECT_DIR/packages/cli/package.json').version")"
+    - test -f node_modules/@druxt/cli/starters/index.json
+    - ./node_modules/.bin/drx info
+    - ./node_modules/.bin/create-druxt --help
+    - section_end "pack"
+
+# The one job that needs the network: it creates a site from the real
+# quickstart tarball the registry entry points at, and reads it back.
+test:e2e:
+  extends: .node
+  stage: test
+  needs: []
+  script:
+    - section_start "e2e" "Creating a site from the real starter"
+    - npm run test:e2e
+    - section_end "e2e"
 
 #
 # --- Secret detection ---
