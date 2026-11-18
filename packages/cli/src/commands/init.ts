@@ -339,6 +339,8 @@ async function runInit(
         })
       : defaultDir)
   const target = targetDirectory(context.cwd, dir, options.force)
+  // Looked at before the download, which fills the directory.
+  const held = existsSync(target) && readdirSync(target).length > 0
 
   const install =
     options.install ??
@@ -382,8 +384,20 @@ async function runInit(
 
   let removed: string[] = []
   if (engine && !options.keepEngines) {
-    removed = await removeEngineFiles(target, engine.remove, engine.keep)
-    if (removed.length > 0) {
+    // In a directory that held files, a path of another engine may be the
+    // user's own, and --force was a yes to writing, not to deleting.
+    const paths = await removeEngineFiles(
+      target,
+      engine.remove,
+      engine.keep,
+      held
+    )
+    if (held && paths.length > 0) {
+      output.warn(
+        `${target} was not empty, so the files of the engines not chosen were left in place: ${paths.join(', ')}. --force writes the files of the starter and deletes nothing.`
+      )
+    } else if (paths.length > 0) {
+      removed = paths
       output.note(
         `Removed the files of the engines not chosen: ${removed.join(', ')}.`
       )
