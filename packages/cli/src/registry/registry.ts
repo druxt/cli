@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { DrxError } from '../errors.js'
 import { bundledRegistryDir } from '../package-root.js'
 import { isRecord, isStringArray } from '../validate.js'
+import { trimEndSlashes } from '../slashes.js'
 import { validateEntry, type StarterEntry } from './entry.js'
 
 /**
@@ -147,14 +148,12 @@ export async function openRegistry(
   options: OpenRegistryOptions = {}
 ): Promise<Registry> {
   const fetcher = options.fetch ?? fetch
-  const trim = (url: string) => url.replace(/\/+$/, '')
-
   if (options.url) {
-    const base = trim(options.url)
+    const base = trimEndSlashes(options.url)
     return remoteRegistry(base, remoteReader(base, fetcher, options.auth))
   }
 
-  const base = trim(options.defaultUrl ?? DEFAULT_REGISTRY)
+  const base = trimEndSlashes(options.defaultUrl ?? DEFAULT_REGISTRY)
   const remote = remoteRegistry(base, remoteReader(base, fetcher))
   try {
     const names = await remote.names()
