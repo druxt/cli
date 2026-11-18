@@ -83,6 +83,15 @@ export interface StarterDetails {
   /** The ways the backend can be run. Supersedes `requires.commands`. */
   engines?: StarterEngine[]
   backendUrl?: BackendUrlTarget
+  /** What the install of the site's package manager does past installing. */
+  install?: StarterInstall
+}
+
+export interface StarterInstall {
+  /** The steps the install runs itself, which are then not left to run. */
+  runs?: string[]
+  /** What to know once it has run, such as how to start the backend again. */
+  notes?: string[]
 }
 
 /** A giget registry entry with the `druxt` object `init` needs. */
@@ -267,6 +276,15 @@ function entryProblem(entry: unknown): string | undefined {
   }
   if (druxt.steps !== undefined && !isStringArray(druxt.steps)) {
     return 'druxt.steps must be an array of strings'
+  }
+  const install = druxt.install
+  if (install !== undefined) {
+    if (!isRecord(install)) return 'druxt.install must be an object'
+    for (const key of ['runs', 'notes']) {
+      if (install[key] !== undefined && !isStringArray(install[key])) {
+        return `druxt.install.${key} must be an array of strings`
+      }
+    }
   }
   return enginesProblem(druxt.engines) ?? backendUrlProblem(druxt.backendUrl)
 }

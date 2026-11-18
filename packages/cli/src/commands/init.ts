@@ -439,13 +439,20 @@ async function runInit(
 
   const fromCwd = relative(context.cwd, target)
   const inside = fromCwd !== '' && !fromCwd.startsWith('..')
+  // A step the install ran is not left to run: running a setup twice can
+  // undo the first.
+  const ran = install ? entry.druxt.install : undefined
   const next = [
     `cd ${shellQuote(inside && !isAbsolute(fromCwd) ? fromCwd : target)}`,
-    ...stepLines(engine ? engine.steps : (entry.druxt.steps ?? [])),
+    ...stepLines(
+      (engine ? engine.steps : (entry.druxt.steps ?? [])).filter(
+        (step) => !(typeof step === 'string' && ran?.runs?.includes(step))
+      )
+    ),
   ]
   const { requires } = entry.druxt
   const needs = engine ? [engine.label] : requires.tools
-  const notes = engine?.notes ?? []
+  const notes = [...(engine?.notes ?? []), ...(ran?.notes ?? [])]
 
   output.result(
     {
