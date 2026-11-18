@@ -101,7 +101,7 @@ The same table, for the modules whose name, package name or description contains
 
 ### `drx module info <name>`
 
-Shows one module, found by its registry name or its package name: the package, type, status, category, Druxt range, repository and website, and the backend modules it needs, with the ones that are part of Drupal core marked. Inside a project it adds the installed version and the compatibility. It takes `--module-registry`, `--refresh` and `--json`.
+Shows one module, found by its registry name or its package name: the package, type, status, category, Druxt range, repository and website, and the backend modules it needs, with the ones that are part of Drupal core marked. When the registry marks no module as core, the text says so and `core` is `null` in the JSON. It is `false` only in a registry that marks the modules that are core. Inside a project it adds the installed version and the compatibility. It takes `--module-registry`, `--refresh` and `--json`.
 
 A name that matches nothing exits with 1 and prints the closest names.
 
