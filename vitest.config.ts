@@ -19,6 +19,14 @@ export default defineConfig({
       provider: 'v8',
       include: ['packages/*/src/**/*.ts', 'scripts/lint-private-refs.mjs'],
       reporter: ['text', 'lcov'],
+      // A floor measured from the tests as they are, not a target. Raise it
+      // when coverage improves, and never lower it to make a change pass.
+      thresholds: {
+        statements: 94,
+        branches: 87,
+        functions: 95,
+        lines: 94,
+      },
     },
   },
 })

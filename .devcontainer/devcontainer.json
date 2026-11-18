@@ -1,0 +1,30 @@
+{
+  "name": "Druxt CLI",
+  "image": "mcr.microsoft.com/devcontainers/base:trixie",
+  "features": {
+    // The version in .nvmrc, which the pipelines build on. Node 16 is for running a site made from the 0.x
+    // starter: `nvm use 16.18.1` in the site's directory.
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "24.18.0",
+      "additionalVersions": "16.18.1"
+    },
+    // For the Drupal part of a site `drx init` creates. The feature builds PHP from source, against trixie's
+    // SQLite, which meets Drupal 11's minimum.
+    "ghcr.io/devcontainers/features/php:1": {
+      "version": "8.4",
+      "installComposer": true
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  // Installs the dependencies and builds both packages, so `drx` runs as soon as the container is up.
+  "postCreateCommand": "npm ci && npm run build && npm link --workspace @druxt/cli --workspace create-druxt",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "vitest.explorer"
+      ]
+    }
+  }
+}
