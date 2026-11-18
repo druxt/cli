@@ -162,25 +162,27 @@ fi
 
 # --- the repository's markdown -----------------------------------------------
 
-markdown=()
+# A read loop, and each array that can be empty expanded behind a guard:
+# macOS has bash 3.2 as /bin/bash, which has no builtin that reads into an
+# array and will not expand an empty one under `set -u`.
 if [ "$all" -eq 1 ]; then
-  mapfile -d '' -t markdown < <(git -C "$root" ls-files -z -- '*.md')
+  list=(ls-files -z -- '*.md')
 elif [ -n "$base" ]; then
-  mapfile -d '' -t markdown < <(git -C "$root" diff -z --name-only --diff-filter=AMR "$base" HEAD -- '*.md')
+  list=(diff -z --name-only --diff-filter=AMR "$base" HEAD -- '*.md')
 else
-  mapfile -d '' -t markdown < <(git -C "$root" diff-tree -z --no-commit-id -r --name-only --diff-filter=AMR HEAD -- '*.md')
+  list=(diff-tree -z --no-commit-id -r --name-only --diff-filter=AMR HEAD -- '*.md')
 fi
 existing=()
-for f in "${markdown[@]}"; do
+while IFS= read -r -d '' f; do
   [ -f "$root/$f" ] && existing+=("$f")
-done
+done < <(git -C "$root" "${list[@]}")
 
 if [ "${#existing[@]}" -gt 0 ]; then
   glob=()
   if [ -n "${PROSE_LINT_GLOB:-}" ]; then
     glob=(--glob="$PROSE_LINT_GLOB")
   fi
-  out="$(cd "$root" && "$vale" --config "$ini" --output=line "${glob[@]}" "${existing[@]}" 2>&1)"
+  out="$(cd "$root" && "$vale" --config "$ini" --output=line ${glob[@]+"${glob[@]}"} "${existing[@]}" 2>&1)"
   rc=$?
   if [ -n "$out" ]; then
     printf '%s\n' "$out"

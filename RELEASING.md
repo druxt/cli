@@ -28,17 +28,17 @@ A snapshot version reads `0.1.0-dev.20261030024907`: the version the pending cha
 3. Merge that pull request when the release is ready. This is the release decision.
 4. The push that follows waits for a reviewer to approve the `release` environment, then publishes each new version to `latest`. It also creates a tag such as `@druxt/cli@0.1.0` for each, with a GitHub Release whose notes are that version's entry in the package's `CHANGELOG.md`.
 
-A release from an older major's branch publishes under its own tag: `1.9.1`, cut on `1.x` after `2.0.0`, goes to `latest-1`. GitHub does not mark its Release as the latest one. A prerelease publishes under `next`.
+A release from an older major's branch publishes under its own tag: `1.9.1`, cut on `1.x` after `2.0.0`, goes to `latest-1`. GitHub does not mark its Release as the latest one. A prerelease publishes under `next`. The tag is chosen when the version is packed, and `latest` is checked against npm again after the approval, in case another release line published a higher version while the run waited.
 
 A version counts as released once npm has it and its GitHub Release exists. If a run fails between the two, or after one package and before the other, rerun it: it skips what is published and creates what is missing.
 
 ## Build and publish jobs
 
-| Job                | Runs repository code                                   | Can write to the repository             | Can publish to npm |
-| ------------------ | ------------------------------------------------------ | --------------------------------------- | ------------------ |
-| `snapshot`, `pack` | Yes, install scripts included                          | No                                      | No                 |
-| `version`          | Only the changesets tooling, installed without scripts | Yes, to open the version pull request   | No                 |
-| `dev`, `release`   | No, they check out nothing                             | `release` creates the tags and Releases | Yes                |
+| Job                | Runs repository code                                                                                                                 | Can write to the repository             | Can publish to npm |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------- | ------------------ |
+| `snapshot`, `pack` | Yes, install scripts included                                                                                                        | No                                      | No                 |
+| `version`          | The `release:version` script and the changelog generator, as the release branch has them. Dependencies are installed without scripts | Yes, to open the version pull request   | No                 |
+| `dev`, `release`   | No, they check out nothing                                                                                                           | `release` creates the tags and Releases | Yes                |
 
 The build jobs end by packing the tarballs, and the publish jobs hand those tarballs to npm. A pull request rehearses the `snapshot` job only, so code in a pull request never runs with publishing rights. A fork's own pushes skip the workflow.
 

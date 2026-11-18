@@ -157,6 +157,21 @@ describe('resolveRegistryUrl', () => {
     )
   })
 
+  test('fails on a name every object has, when the configuration does not define it', () => {
+    for (const name of ['constructor', 'toString', '__proto__']) {
+      expect(() => resolveRegistryUrl(name, config)).toThrow(
+        `"${name}" is neither.`
+      )
+    }
+  })
+
+  test('takes such a name when the configuration defines it', () => {
+    const registries = { constructor: 'https://example.com/built' }
+    expect(resolveRegistryUrl('constructor', { ...config, registries })).toBe(
+      'https://example.com/built'
+    )
+  })
+
   test('fails on a name the configuration does not define', () => {
     expect(() => resolveRegistryUrl('other', config)).toThrow(
       '--registry takes a URL or a name defined in /home/me/.config/drx/config.json. "other" is neither. Defined names: team.'

@@ -479,7 +479,11 @@ describe('drx init warnings', () => {
   })
 
   test('does not warn when it is', async () => {
-    const result = await init(['site', '--yes'], { nodeVersion: '16.18.1' })
+    const result = await init(['site', '--yes'], {
+      nodeVersion: '16.18.1',
+      // A date, so that the fixture's `maintained` never grows a year old.
+      now: () => new Date('2026-12-01T00:00:00Z'),
+    })
     expect(result.stderr).not.toContain('Warning')
   })
 
