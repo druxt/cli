@@ -25,14 +25,25 @@ function plain(stream: TextStream, text: string): string {
   return stream.isTTY ? text : stripVTControlCharacters(text)
 }
 
+/** The meta of a command, which citty lets be a value, a promise or a function. */
+async function resolveMeta(command: CommandDef) {
+  const { meta } = command
+  return typeof meta === 'function' ? await meta() : await meta
+}
+
 /** The usage of the command the arguments name, or of `drx` itself. */
 async function usage(
   main: CommandDef,
   subCommands: Record<string, CommandDef>,
-  argv: string[]
+  argv: string[],
+  startedAs: CliContext['startedAs']
 ): Promise<string> {
   const name = argv.find((argument) => !argument.startsWith('-'))
   const command = name ? subCommands[name] : undefined
+  if (command && startedAs && startedAs.command === name) {
+    const meta = { ...(await resolveMeta(command)), name: startedAs.name }
+    return renderUsage({ ...command, meta })
+  }
   return command ? renderUsage(command, main) : renderUsage(main)
 }
 
@@ -71,7 +82,9 @@ export async function runCli(
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
-      stdout.write(`${plain(stdout, await usage(main, subCommands, argv))}\n`)
+      stdout.write(
+        `${plain(stdout, await usage(main, subCommands, argv, context.startedAs))}\n`
+      )
       return 0
     }
     if (argv.length === 1 && ['--version', '-v'].includes(argv[0] ?? '')) {

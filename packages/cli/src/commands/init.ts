@@ -325,10 +325,14 @@ async function runInit(
 
   const fromCwd = relative(context.cwd, target)
   const inside = fromCwd !== '' && !fromCwd.startsWith('..')
+  // A step the install ran is not left to run: running a setup twice can
+  // undo the first.
+  const ran = install ? entry.druxt.install : undefined
   const next = [
     `cd ${shellQuote(inside && !isAbsolute(fromCwd) ? fromCwd : target)}`,
-    ...(entry.druxt.steps ?? []),
+    ...(entry.druxt.steps ?? []).filter((step) => !ran?.runs?.includes(step)),
   ]
+  const notes = ran?.notes ?? []
   const { requires } = entry.druxt
 
   output.result(
@@ -340,6 +344,7 @@ async function runInit(
       installed: install,
       requires,
       next,
+      notes,
     },
     [
       `Created a Druxt site in ${target} from the ${entry.name} starter.`,
@@ -350,6 +355,9 @@ async function runInit(
       '',
       'Next:',
       ...next.map((step) => `  ${step}`),
+      ...(notes.length > 0
+        ? ['', 'Note:', ...notes.map((note) => `  ${note}`)]
+        : []),
     ].join('\n')
   )
 }

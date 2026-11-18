@@ -106,6 +106,7 @@ describe('drx init', () => {
       installed: false,
       requires: { node: '16.18.1', tools: ['DDEV'] },
       next: ['cd site', 'npm run setup', 'npm run dev'],
+      notes: [],
     })
     expect(result.stderr).toContain('Reading starters from')
   })
@@ -426,6 +427,50 @@ describe('drx init --install', () => {
     expect(result.code).toBe(0)
     expect(install).toHaveBeenCalledExactlyOnceWith(join(cwd, 'site'))
     expect(JSON.parse(result.stdout).installed).toBe(true)
+  })
+
+  test('leaves out of Next the steps the install ran, and adds its notes', async () => {
+    await registry.close()
+    registry = await fixtureRegistry(STARTER_FILES, (entry) => {
+      ;(entry.druxt as Record<string, unknown>).install = {
+        runs: ['npm run setup'],
+        notes: ['npm run dev starts the backend again.'],
+      }
+    })
+    const install = vi.fn(async () => {})
+    const result = await init(['site', '--yes', '--install'], { install })
+    expect(result.stdout).toBe(
+      [
+        `Created a Druxt site in ${join(cwd, 'site')} from the quickstart starter.`,
+        '',
+        'It needs:',
+        '  Node 16.18.1',
+        '  DDEV',
+        '',
+        'Next:',
+        '  cd site',
+        '  npm run dev',
+        '',
+        'Note:',
+        '  npm run dev starts the backend again.',
+        '',
+      ].join('\n')
+    )
+
+    const json = await init(['json', '--yes', '--install', '--json'], {
+      install,
+    })
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      next: ['cd json', 'npm run dev'],
+      notes: ['npm run dev starts the backend again.'],
+    })
+
+    // Without the install, every step is still to run.
+    const plain = await init(['plain', '--yes', '--json'], { install })
+    expect(JSON.parse(plain.stdout)).toMatchObject({
+      next: ['cd plain', 'npm run setup', 'npm run dev'],
+      notes: [],
+    })
   })
 
   test('does not install with --no-install or by default', async () => {
