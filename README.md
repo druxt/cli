@@ -362,7 +362,7 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 }
 ```
 
-`name`, `tar`, `defaultDir`, `url`, `subdir` and `headers` are giget's fields. giget ignores the `druxt` object, so the same file works with `npx giget --registry <url> quickstart`.
+`name`, `tar`, `defaultDir`, `url`, `subdir` and `headers` are giget's fields. giget ignores the `druxt` object, so the same file works with `GIGET_REGISTRY=<url> npx giget quickstart`.
 
 | Key in `druxt`      | What it holds                                                                                                       |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------- |

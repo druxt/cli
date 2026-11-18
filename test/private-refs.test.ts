@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, test } from 'vitest'
-import { findPrivateRefs } from '../scripts/lint-private-refs.mjs'
+import { findPrivateRefs, mappedToIpv4 } from '../scripts/lint-private-refs.mjs'
 
 const SCRIPT = fileURLToPath(
   new URL('../scripts/lint-private-refs.mjs', import.meta.url)
@@ -49,6 +49,32 @@ describe('findPrivateRefs', () => {
   test('leaves the local development hosts alone', () => {
     expect(hostsIn('http://localhost:3000/ http://127.0.0.1:8888/')).toEqual([])
     expect(hostsIn('http://[::1]/ https://example.ddev.site/')).toEqual([])
+  })
+
+  test('finds a private name with nothing before it', () => {
+    expect(hostsIn('see http://intranet/project and http://corp/')).toEqual([
+      'intranet',
+      'corp',
+    ])
+    expect(hostsIn('http://localhost/ http://example/')).toEqual([])
+  })
+
+  test('finds a link-local IPv4 address, mapped or not', () => {
+    expect(hostsIn('http://169.254.1.1/')).toEqual(['169.254.1.1'])
+    expect(hostsIn('http://[::ffff:169.254.1.1]/')).toEqual(['169.254.1.1'])
+    expect(hostsIn('http://169.253.1.1/ http://169.255.1.1/')).toEqual([])
+  })
+
+  test('reads a scheme in any case', () => {
+    expect(hostsIn('HTTP://gitlab.example.local/x')).toEqual([
+      'gitlab.example.local',
+    ])
+    expect(hostsIn('Https://10.0.0.8/')).toEqual(['10.0.0.8'])
+  })
+
+  test('ignores an IPv6 literal with too many groups', () => {
+    expect(mappedToIpv4('1:2:3:4:5:6:7::8:9')).toBe('1:2:3:4:5:6:7::8:9')
+    expect(hostsIn('http://[1:2:3:4:5:6:7::8:9]/')).toEqual([])
   })
 
   test('reads the host, not the userinfo a git remote carries', () => {
