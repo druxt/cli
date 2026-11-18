@@ -1,3 +1,4 @@
+import { isCommandName } from '../commands-on-path.js'
 import { DrxError } from '../errors.js'
 import { isLayout, LAYOUTS, type Layout } from '../layouts.js'
 import { partsProblem, type Part } from '../parts.js'
@@ -13,6 +14,12 @@ export interface StarterRequirements {
   node: string
   /** Other tools the site needs, each as a phrase to show the user. */
   tools: string[]
+  /**
+   * The commands the site needs on PATH, as alternatives: the site can be set
+   * up when every command of any one inner list is there. `tools` is what the
+   * user reads, and this is what `init` checks.
+   */
+  commands?: string[][]
 }
 
 /** What Druxt adds to a giget registry entry. giget ignores the key. */
@@ -47,6 +54,26 @@ function isIsoDate(value: unknown): boolean {
   }
   const date = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(date.getTime()) && date.toISOString().startsWith(value)
+}
+
+/** The first problem with `requires.commands`, or undefined. */
+function commandsProblem(value: unknown): string | undefined {
+  const at = 'druxt.requires.commands'
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length === 0) {
+    return `${at} must be a non-empty array of alternatives`
+  }
+  for (const [index, alternative] of value.entries()) {
+    if (!Array.isArray(alternative) || alternative.length === 0) {
+      return `${at}[${index}] must be a non-empty array of command names`
+    }
+    for (const [position, name] of alternative.entries()) {
+      if (!isCommandName(name)) {
+        return `${at}[${index}][${position}] must be a command name with no path or spaces`
+      }
+    }
+  }
+  return undefined
 }
 
 /** The first problem with an entry, or undefined when it is valid. */
@@ -84,6 +111,8 @@ function entryProblem(entry: unknown): string | undefined {
   if (!isStringArray(requires.tools)) {
     return 'druxt.requires.tools must be an array of strings'
   }
+  const commands = commandsProblem(requires.commands)
+  if (commands) return commands
   if (!isIsoDate(druxt.maintained)) {
     return 'druxt.maintained must be an ISO date (YYYY-MM-DD)'
   }

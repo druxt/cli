@@ -6,6 +6,7 @@ import type { UserConfig } from '../src/user-config.js'
 const config: UserConfig = {
   path: '/home/me/.config/drx/config.json',
   registries: {},
+  moduleRegistries: {},
   sources: {
     next: { type: 'npm', tag: 'next' },
     branch: { type: 'git', url: 'https://example.com/druxt.git', ref: 'x' },

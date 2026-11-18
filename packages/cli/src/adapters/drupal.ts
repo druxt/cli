@@ -56,5 +56,9 @@ export const drupalAdapter: KindAdapter = {
     )
   },
 
+  // The Druxt packages a module registry lists are frontend packages.
+  druxt: async () => undefined,
+  package: async () => undefined,
+
   addModule: addModuleNotAvailable,
 }

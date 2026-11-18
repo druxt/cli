@@ -1,8 +1,15 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { bundledRegistryDir } from '../../src/package-root.js'
+import { bundledRegistryDir, packageRoot } from '../../src/package-root.js'
 import {
   DEFAULT_REGISTRY,
   defaultStarter,
@@ -192,7 +199,28 @@ describe('the bundled registry', () => {
       'https://codeload.github.com/druxt/quickstart/tar.gz/refs/heads/develop'
     )
     expect(starter.druxt.default).toBe(true)
+    expect(starter.druxt.requires.commands).toEqual([
+      ['php', 'composer'],
+      ['ddev'],
+    ])
     expect((await defaultStarter(registry))?.name).toBe('quickstart')
+  })
+})
+
+describe('the copy of the registry the build puts in the package', () => {
+  const source = join(packageRoot(), '..', '..', 'starters')
+  const copy = join(packageRoot(), 'starters')
+
+  // The copy exists only after a build. A stale one would be read by every
+  // other test here in place of starters/, so it has to match.
+  test.skipIf(!existsSync(copy))('equals starters/', () => {
+    const files = readdirSync(source).sort()
+    expect(readdirSync(copy).sort()).toEqual(files)
+    for (const file of files) {
+      expect(readFileSync(join(copy, file), 'utf8'), file).toBe(
+        readFileSync(join(source, file), 'utf8')
+      )
+    }
   })
 })
 

@@ -16,6 +16,14 @@ describe('validateEntry', () => {
     expect(validateEntry(entry, 'quickstart')).toEqual(entry)
   })
 
+  test('accepts alternatives of commands the site needs', () => {
+    const entry = entryWith('druxt.requires.commands', [
+      ['php', 'composer'],
+      ['ddev'],
+    ])
+    expect(validateEntry(entry, 'quickstart')).toEqual(entry)
+  })
+
   test('rejects a value that is not an object', () => {
     expect(() => validateEntry('nope', 'quickstart')).toThrow(
       'Starter entry "quickstart" is invalid: the entry must be an object.'
@@ -84,6 +92,41 @@ describe('validateEntry', () => {
       'druxt.requires.tools',
       [1],
       'druxt.requires.tools must be an array of strings',
+    ],
+    [
+      'druxt.requires.commands',
+      'php',
+      'druxt.requires.commands must be a non-empty array of alternatives',
+    ],
+    [
+      'druxt.requires.commands',
+      [],
+      'druxt.requires.commands must be a non-empty array of alternatives',
+    ],
+    [
+      'druxt.requires.commands',
+      [['php'], 'ddev'],
+      'druxt.requires.commands[1] must be a non-empty array of command names',
+    ],
+    [
+      'druxt.requires.commands',
+      [[]],
+      'druxt.requires.commands[0] must be a non-empty array of command names',
+    ],
+    [
+      'druxt.requires.commands',
+      [['php', '/usr/bin/composer']],
+      'druxt.requires.commands[0][1] must be a command name with no path or spaces',
+    ],
+    [
+      'druxt.requires.commands',
+      [['php -v']],
+      'druxt.requires.commands[0][0] must be a command name with no path or spaces',
+    ],
+    [
+      'druxt.requires.commands',
+      [[7]],
+      'druxt.requires.commands[0][0] must be a command name with no path or spaces',
     ],
     [
       'druxt.maintained',

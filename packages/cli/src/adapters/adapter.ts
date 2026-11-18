@@ -23,6 +23,16 @@ export interface KindAdapter {
   detect(dir: string): Promise<boolean>
   /** The packages `info` reports for a part of this kind. */
   packages(dir: string): Promise<PackageVersion[]>
+  /**
+   * The Druxt package of the part: the range it asks for and the version
+   * installed. Undefined when the part has none, or its kind never holds one.
+   */
+  druxt(dir: string): Promise<PackageVersion | undefined>
+  /**
+   * One package of the part by name, or undefined when the part neither
+   * asks for it nor has it installed.
+   */
+  package(dir: string, name: string): Promise<PackageVersion | undefined>
   /** Installs a module into the part and registers it. Not available yet. */
   addModule(dir: string, name: string): Promise<void>
 }

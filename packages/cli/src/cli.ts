@@ -2,6 +2,7 @@ import { stripVTControlCharacters } from 'node:util'
 import { defineCommand, renderUsage, runCommand, type CommandDef } from 'citty'
 import { infoCommand } from './commands/info.js'
 import { initCommand } from './commands/init.js'
+import { moduleCommand } from './commands/module.js'
 import { defaultContext, type CliContext, type TextStream } from './context.js'
 import { DrxError } from './errors.js'
 import { cliVersion } from './package-root.js'
@@ -16,6 +17,7 @@ function mainCommand(context: CliContext) {
     subCommands: {
       init: initCommand(context),
       info: infoCommand(context),
+      module: moduleCommand(context),
     },
   })
 }
@@ -25,15 +27,24 @@ function plain(stream: TextStream, text: string): string {
   return stream.isTTY ? text : stripVTControlCharacters(text)
 }
 
-/** The usage of the command the arguments name, or of `drx` itself. */
-async function usage(
-  main: CommandDef,
-  subCommands: Record<string, CommandDef>,
-  argv: string[]
-): Promise<string> {
-  const name = argv.find((argument) => !argument.startsWith('-'))
-  const command = name ? subCommands[name] : undefined
-  return command ? renderUsage(command, main) : renderUsage(main)
+/**
+ * The usage of the command the arguments name, or of `drx` itself. A command
+ * may hold commands of its own, so the names are followed as far as they go.
+ */
+async function usage(main: CommandDef, argv: string[]): Promise<string> {
+  let command = main
+  let parent: CommandDef | undefined
+  let path = 'drx'
+  for (const name of argv.filter((argument) => !argument.startsWith('-'))) {
+    const next = (
+      command.subCommands as Record<string, CommandDef> | undefined
+    )?.[name]
+    if (!next) break
+    parent = { meta: { name: path } }
+    path = `${path} ${name}`
+    command = next
+  }
+  return renderUsage(command, parent)
 }
 
 /** The code and message to report for anything a command throws. */
@@ -66,12 +77,11 @@ export async function runCli(
 ): Promise<number> {
   const context = { ...defaultContext(), ...overrides }
   const main = mainCommand(context)
-  const subCommands = main.subCommands as Record<string, CommandDef>
   const { stdout, stderr } = context
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
-      stdout.write(`${plain(stdout, await usage(main, subCommands, argv))}\n`)
+      stdout.write(`${plain(stdout, await usage(main, argv))}\n`)
       return 0
     }
     if (argv.length === 1 && ['--version', '-v'].includes(argv[0] ?? '')) {

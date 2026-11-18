@@ -2,6 +2,11 @@ import { existsSync, readdirSync, statSync } from 'node:fs'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { defineCommand, type ArgsDef } from 'citty'
 import { assertKnownOptions } from '../args.js'
+import {
+  checkCommands,
+  describeAlternatives,
+  type CommandCheck,
+} from '../commands-on-path.js'
 import type { CliContext } from '../context.js'
 import { DrxError } from '../errors.js'
 import {
@@ -186,7 +191,7 @@ function warnAboutStarter(
   target: string,
   context: CliContext,
   output: Output
-): void {
+): CommandCheck | null {
   const { requires, maintained, parts } = entry.druxt
   if (!nodeSatisfies(context.nodeVersion, requires.node)) {
     output.warn(
@@ -206,6 +211,19 @@ function warnAboutStarter(
       )
     }
   }
+
+  if (!requires.commands) return null
+  const commands = checkCommands(requires.commands, context.findCommand)
+  if (!commands.satisfied) {
+    const advice =
+      commands.alternatives.length > 1
+        ? 'Install the commands of one alternative'
+        : 'Install what is missing'
+    output.warn(
+      `The ${entry.name} starter needs ${describeAlternatives(commands.alternatives)}. Not found on PATH: ${commands.missing.join(', ')}. ${advice} before you set up the site.`
+    )
+  }
+  return commands
 }
 
 async function runInit(
@@ -302,7 +320,7 @@ async function runInit(
     parts: entry.druxt.parts,
   }
   await writeProjectConfig(target, config)
-  warnAboutStarter(entry, target, context, output)
+  const commands = warnAboutStarter(entry, target, context, output)
 
   if (install) {
     output.note('Installing dependencies.')
@@ -333,6 +351,7 @@ async function runInit(
       ...config,
       installed: install,
       requires,
+      commands,
       next,
     },
     [
