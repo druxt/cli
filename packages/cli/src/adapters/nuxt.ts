@@ -5,6 +5,7 @@ import {
   emptyChange,
   type KindAdapter,
   type ModuleChange,
+  type PackageRecord,
   type PackageVersion,
 } from './adapter.js'
 import { editModules } from './nuxt-config.js'
@@ -75,65 +76,122 @@ function packageManager(dir: string) {
   return MANAGERS.find(({ lock }) => existsSync(join(dir, lock))) ?? NPM
 }
 
+const configFile = (dir: string) =>
+  CONFIG_FILES.find((candidate) => existsSync(join(dir, candidate)))
+
 /**
- * The steps that add a package to the part and list it in the config, or
- * that take both away again. The install comes first, so a failed one leaves
- * the config as it was.
+ * The steps that add a package to the part and list it in the config. The
+ * install comes first, so a failed one leaves the config as it was. What the
+ * steps do, and what was there already, is kept for the project's record.
  */
-async function changeModule(
+async function addModule(
+  dir: string,
+  name: string | undefined
+): Promise<ModuleChange> {
+  const change = emptyChange()
+  if (!name) return change
+  const did: PackageRecord = { installed: false, listed: false }
+  change.did = did
+
+  const manager = packageManager(dir)
+  if (name in (await declared(dir))) {
+    change.notes.push(`${name} is already a dependency in package.json.`)
+  } else {
+    change.steps.push({
+      run: { tool: manager.tool, args: [manager.add, name] },
+    })
+    did.installed = true
+  }
+
+  const file = configFile(dir)
+  if (!file) {
+    change.manual.push(
+      `Add '${name}' to the modules array of the config. No config file was found.`
+    )
+    return change
+  }
+  const edit = editModules(await readFile(join(dir, file), 'utf8'), name, 'add')
+  if (edit.kind === 'changed') {
+    change.steps.push({
+      edit: {
+        file,
+        content: edit.content,
+        summary: `Add '${name}' to modules in ${file}`,
+      },
+    })
+    did.listed = true
+  } else if (edit.kind === 'unsafe') {
+    change.manual.push(
+      `Add '${name}' to the modules array in ${file}. It could not be edited safely.`
+    )
+  } else {
+    change.notes.push(`${name} is already in modules in ${file}.`)
+  }
+  return change
+}
+
+/**
+ * The steps that take away what an add did: the package when it installed
+ * it, and the entry in the config when it wrote it. What the part had before
+ * stays, and so does everything when the record does not say who put it
+ * there.
+ */
+async function removeModule(
   dir: string,
   name: string | undefined,
-  action: 'add' | 'remove'
+  did: PackageRecord | undefined
 ): Promise<ModuleChange> {
   const change = emptyChange()
   if (!name) return change
 
   const manager = packageManager(dir)
   const dependency = name in (await declared(dir))
-  if (action === 'add' && dependency) {
-    change.notes.push(`${name} is already a dependency in package.json.`)
-  } else if (action === 'add' || dependency) {
-    change.steps.push({
-      run: { tool: manager.tool, args: [manager[action], name] },
-    })
-  }
+  const file = configFile(dir)
+  const edit = file
+    ? editModules(await readFile(join(dir, file), 'utf8'), name, 'remove')
+    : undefined
+  const listed = edit !== undefined && edit.kind !== 'unchanged'
 
-  const file = CONFIG_FILES.find((candidate) =>
-    existsSync(join(dir, candidate))
-  )
-  if (!file) {
-    if (action === 'add') {
+  if (!did) {
+    if (dependency || listed) {
       change.manual.push(
-        `Add '${name}' to the modules array of the config. No config file was found.`
+        `The record does not say whether drx add installed ${name}, so it was left. To take it out: ${[
+          ...(dependency ? [`${manager.tool} ${manager.remove} ${name}`] : []),
+          ...(listed ? [`remove '${name}' from modules in ${file}`] : []),
+        ].join(', and ')}.`
       )
     }
     return change
   }
 
-  const edit = editModules(
-    await readFile(join(dir, file), 'utf8'),
-    name,
-    action
-  )
-  if (edit.kind === 'changed') {
+  if (dependency) {
+    if (did.installed) {
+      change.steps.push({
+        run: { tool: manager.tool, args: [manager.remove, name] },
+      })
+    } else {
+      change.notes.push(
+        `${name} was in package.json before drx add, so it stays.`
+      )
+    }
+  }
+  if (!file || !edit || !listed) return change
+  if (!did.listed) {
+    change.notes.push(
+      `${name} was in modules in ${file} before drx add, so it stays.`
+    )
+  } else if (edit.kind === 'changed') {
     change.steps.push({
       edit: {
         file,
         content: edit.content,
-        summary:
-          action === 'add'
-            ? `Add '${name}' to modules in ${file}`
-            : `Remove '${name}' from modules in ${file}`,
+        summary: `Remove '${name}' from modules in ${file}`,
       },
     })
-  } else if (edit.kind === 'unsafe') {
+  } else {
     change.manual.push(
-      action === 'add'
-        ? `Add '${name}' to the modules array in ${file}. It could not be edited safely.`
-        : `Remove '${name}' from the modules array in ${file}. It could not be edited safely.`
+      `Remove '${name}' from the modules array in ${file}. It could not be edited safely.`
     )
-  } else if (action === 'add') {
-    change.notes.push(`${name} is already in modules in ${file}.`)
   }
   return change
 }
@@ -176,6 +234,7 @@ export const nuxtAdapter: KindAdapter = {
 
   package: packageVersion,
 
-  addModule: (dir, request) => changeModule(dir, request.package, 'add'),
-  removeModule: (dir, request) => changeModule(dir, request.package, 'remove'),
+  addModule: (dir, request) => addModule(dir, request.package),
+  removeModule: (dir, request) =>
+    removeModule(dir, request.package, request.did),
 }

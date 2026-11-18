@@ -137,14 +137,57 @@ function snapshot(root: string): Record<string, string> {
   )
 }
 
+/** What the stand-in backend has enabled, and what depends on what. */
+interface Backend {
+  enabled?: string[]
+  /** For a module, the enabled modules that depend on it. */
+  dependents?: Record<string, string[]>
+  /** True when the backend cannot be asked anything. */
+  unreadable?: boolean
+  /** For a module, what the backend enables along with it. */
+  brings?: Record<string, string[]>
+}
+
 /**
  * A stand-in for the tools: it records each command line, and an install of
- * a frontend package writes the dependency as the package manager would.
+ * a frontend package writes the dependency as the package manager would. A
+ * question to the backend is answered from `backend` and kept in `asked`,
+ * apart from the commands that change something.
  */
-function tools(root: string, fail?: { on: string; output: string }) {
+function tools(
+  root: string,
+  fail?: { on: string; output: string },
+  backend: Backend = {}
+) {
   const calls: string[] = []
+  const asked: string[] = []
+  const enabled = new Set(backend.enabled ?? [])
   const exec: CliContext['exec'] = async (command, args, { cwd }) => {
     const line = `${relative(root, cwd)}$ ${command} ${args.join(' ')}`
+    if (args.includes('pm:list')) {
+      asked.push(line)
+      if (backend.unreadable) return { code: 1, output: 'No database.' }
+      const list = Object.fromEntries(
+        [...enabled].map((name) => [name, { name }])
+      )
+      return { code: 0, output: JSON.stringify(list) }
+    }
+    if (args.includes('--simulate')) {
+      asked.push(line)
+      const name = args.at(-2) as string
+      if (backend.unreadable) return { code: 1, output: 'No database.' }
+      if (!enabled.has(name)) {
+        return {
+          code: 1,
+          output: `The following module(s) are not installed: ${name}. No modules to uninstall.`,
+        }
+      }
+      const all = [name, ...(backend.dependents?.[name] ?? [])]
+      return {
+        code: 0,
+        output: `The following extensions will be uninstalled: ${all.join(', ')}\n`,
+      }
+    }
     calls.push(line)
     if (fail && line.includes(fail.on)) return { code: 1, output: fail.output }
     if (command === 'npm') {
@@ -155,20 +198,42 @@ function tools(root: string, fail?: { on: string; output: string }) {
       else delete manifest.dependencies[args[1] as string]
       writeFileSync(file, JSON.stringify(manifest))
     }
+    const names = args.slice(args.indexOf('-y') + 1)
+    if (args.includes('en')) {
+      for (const name of names) {
+        enabled.add(name)
+        for (const other of backend.brings?.[name] ?? []) enabled.add(other)
+      }
+    }
+    if (args.includes('pmu')) for (const name of names) enabled.delete(name)
     return { code: 0, output: '' } satisfies ToolResult
   }
-  return { calls, exec }
+  return { calls, asked, exec, enabled }
 }
 
-const never: CliContext['exec'] = async (command, args) => {
-  throw new Error(`A command was run: ${command} ${args.join(' ')}`)
+/** Answers what the backend is asked, and fails on anything that changes it. */
+const asking = (root: string, backend: Backend = {}): CliContext['exec'] => {
+  const { exec } = tools(root, undefined, backend)
+  return async (command, args, options) => {
+    if (args.includes('pm:list') || args.includes('--simulate')) {
+      return exec(command, args, options)
+    }
+    throw new Error(`A command was run: ${command} ${args.join(' ')}`)
+  }
 }
 
 const drx = (
   argv: string[],
   cwd: string,
   overrides: Partial<CliContext> = {}
-) => run(argv, { cwd, defaultModuleRegistry: url, exec: never, ...overrides })
+) =>
+  run(argv, {
+    cwd,
+    defaultModuleRegistry: url,
+    // Asking the backend what it has enabled changes nothing.
+    exec: asking(cwd),
+    ...overrides,
+  })
 
 const config = (root: string) =>
   JSON.parse(readFileSync(join(root, 'drx.config.json'), 'utf8'))
@@ -277,17 +342,24 @@ describe('drx add', () => {
       {
         name: 'breadcrumb',
         package: 'druxt-breadcrumb',
+        frontend: [{ path: 'nuxt', installed: true, listed: true }],
         backend: [
           {
             path: 'drupal',
             modules: [
-              { name: 'decoupled_router', package: 'drupal/decoupled_router' },
+              {
+                name: 'decoupled_router',
+                package: 'drupal/decoupled_router',
+                enabled: true,
+                required: true,
+              },
             ],
             patches: [
               {
                 package: 'drupal/decoupled_router',
                 description: PATCH.description,
                 url: PATCH.url,
+                module: 'decoupled_router',
               },
             ],
           },
@@ -630,7 +702,7 @@ describe('drx add in a terminal with no name', () => {
     const result = await picking(
       root,
       { ...answers, 'Make these changes?': false },
-      never
+      asking(root)
     )
     expect(result.code).toBe(1)
     expect(result.stderr).toContain('Error: Cancelled. Nothing was changed.')
@@ -639,6 +711,9 @@ describe('drx add in a terminal with no name', () => {
 })
 
 describe('drx remove', () => {
+  /** The backend once breadcrumb is added. */
+  const ENABLED = { enabled: ['decoupled_router'] }
+
   /** A project with breadcrumb added by `drx add`. */
   async function added(names = ['breadcrumb']) {
     const root = project()
@@ -673,7 +748,7 @@ describe('drx remove', () => {
 
   test('--backend undoes what the record says drx add did, and drops the record', async () => {
     const root = await added()
-    const { calls, exec } = tools(root)
+    const { calls, exec } = tools(root, undefined, ENABLED)
     const result = await drx(['remove', 'breadcrumb', '--backend'], root, {
       exec,
     })
@@ -681,7 +756,7 @@ describe('drx remove', () => {
     expect(calls).toEqual([
       'nuxt$ npm uninstall druxt-breadcrumb',
       'drupal$ ddev drush pmu -y decoupled_router',
-      'drupal$ ddev composer remove drupal/decoupled_router',
+      'drupal$ ddev composer remove --no-update-with-dependencies drupal/decoupled_router',
       'drupal$ ddev composer patches-relock',
     ])
     const composer = JSON.parse(
@@ -700,31 +775,15 @@ describe('drx remove', () => {
     manifest.dependencies['druxt-router'] = '^0.25.0'
     writeFileSync(file, JSON.stringify(manifest))
 
-    const { calls, exec } = tools(root)
+    const { calls, exec } = tools(root, undefined, ENABLED)
     const result = await drx(['remove', 'breadcrumb', '--backend'], root, {
       exec,
     })
     expect(calls).toEqual(['nuxt$ npm uninstall druxt-breadcrumb'])
-    expect(result.stderr).toContain(
-      'decoupled_router stays: another installed module needs it.'
-    )
-  })
-
-  test('touches no backend module that drx add did not put there', async () => {
-    const root = project()
-    const file = join(root, 'nuxt/package.json')
-    const manifest = JSON.parse(readFileSync(file, 'utf8'))
-    manifest.dependencies['druxt-blocks'] = '^0.25.0'
-    writeFileSync(file, JSON.stringify(manifest))
-
-    const { calls, exec } = tools(root)
-    const result = await drx(
-      ['module', 'remove', 'blocks', '--backend'],
-      root,
-      { exec }
-    )
-    expect(result.code).toBe(0)
-    expect(calls).toEqual(['nuxt$ npm uninstall druxt-blocks'])
+    expect(result.stderr).toContain('decoupled_router stays: router needs it.')
+    // router has no record to take it, so it stays on this one.
+    expect(config(root).modules[0].name).toBe('breadcrumb')
+    expect(config(root).modules[0].backend[0].modules).toHaveLength(1)
   })
 
   test('--dry-run prints the steps and changes nothing', async () => {
@@ -732,7 +791,8 @@ describe('drx remove', () => {
     const before = snapshot(root)
     const result = await drx(
       ['remove', 'breadcrumb', '--backend', '--dry-run'],
-      root
+      root,
+      { exec: asking(root, ENABLED) }
     )
     expect(result.code).toBe(0)
     expect(result.stdout).toBe(
@@ -744,7 +804,7 @@ describe('drx remove', () => {
         '  drupal/',
         '    run   ddev drush pmu -y decoupled_router',
         '    edit  Remove 1 patch from composer.json',
-        '    run   ddev composer remove drupal/decoupled_router',
+        '    run   ddev composer remove --no-update-with-dependencies drupal/decoupled_router',
         '    run   ddev composer patches-relock',
         '',
         'Nothing was changed: this was a dry run.',
@@ -760,5 +820,522 @@ describe('drx remove', () => {
     expect(result.stderr).toContain(
       'Cannot remove blocks: druxt-blocks is not in this project.'
     )
+  })
+})
+
+/** The project with one more dependency in the frontend's package.json. */
+function depend(root: string, name: string) {
+  const file = join(root, 'nuxt/package.json')
+  const manifest = JSON.parse(readFileSync(file, 'utf8'))
+  manifest.dependencies[name] = '^0.25.0'
+  writeFileSync(file, JSON.stringify(manifest))
+}
+
+describe('what drx add records', () => {
+  test('says what it did to each part, and what it found in place', async () => {
+    const root = project()
+    // The site has the Decoupled Router module enabled, and not required.
+    const backend = { enabled: ['decoupled_router'] }
+    const { calls, exec } = tools(root, undefined, backend)
+    const result = await drx(['add', 'router'], root, { exec })
+    expect(result.code).toBe(0)
+    expect(calls).toEqual([
+      'nuxt$ npm install druxt-router',
+      'drupal$ ddev composer require drupal/decoupled_router',
+    ])
+    expect(result.stderr).toContain('decoupled_router is already enabled.')
+    expect(config(root).modules).toEqual([
+      {
+        name: 'router',
+        package: 'druxt-router',
+        frontend: [{ path: 'nuxt', installed: true, listed: true }],
+        backend: [
+          {
+            path: 'drupal',
+            modules: [
+              {
+                name: 'decoupled_router',
+                package: 'drupal/decoupled_router',
+                enabled: false,
+                required: true,
+              },
+            ],
+            patches: [],
+          },
+        ],
+      },
+    ])
+  })
+
+  test('records a module the backend enabled along with the one it was asked for', async () => {
+    const root = project()
+    const { calls, exec } = tools(root, undefined, {
+      brings: { decoupled_router: ['path_alias'] },
+      dependents: { path_alias: ['decoupled_router'] },
+    })
+    await drx(['add', 'router'], root, { exec })
+    expect(config(root).modules[0].backend[0].modules).toEqual([
+      {
+        name: 'decoupled_router',
+        package: 'drupal/decoupled_router',
+        enabled: true,
+        required: true,
+      },
+      { name: 'path_alias', enabled: true, required: false },
+    ])
+
+    calls.length = 0
+    await drx(['remove', 'router', '--backend'], root, { exec })
+    expect(calls).toContain(
+      'drupal$ ddev drush pmu -y decoupled_router path_alias'
+    )
+    expect(config(root).modules).toBeUndefined()
+  })
+
+  test('a second add keeps what the first recorded', async () => {
+    const root = project()
+    const { exec } = tools(root)
+    await drx(['add', 'breadcrumb'], root, { exec })
+    const first = config(root).modules
+    expect(first[0].backend[0].modules).toHaveLength(1)
+
+    const again = await drx(['add', 'breadcrumb'], root, { exec })
+    expect(again.code).toBe(0)
+    expect(config(root).modules).toEqual(first)
+  })
+
+  test('add, remove, add, then remove --backend undoes the backend', async () => {
+    const root = project()
+    const { calls, exec } = tools(root)
+    await drx(['add', 'router'], root, { exec })
+    await drx(['remove', 'router'], root, { exec })
+    await drx(['add', 'router'], root, { exec })
+    calls.length = 0
+    const result = await drx(['remove', 'router', '--backend'], root, { exec })
+    expect(result.code).toBe(0)
+    expect(calls).toEqual([
+      'nuxt$ npm uninstall druxt-router',
+      'drupal$ ddev drush pmu -y decoupled_router',
+      'drupal$ ddev composer remove --no-update-with-dependencies drupal/decoupled_router',
+    ])
+    expect(config(root).modules).toBeUndefined()
+  })
+
+  test('reads a record written before the parts were told apart', async () => {
+    const root = project()
+    const file = join(root, 'drx.config.json')
+    const old = JSON.parse(readFileSync(file, 'utf8'))
+    old.modules = [
+      {
+        name: 'router',
+        package: 'druxt-router',
+        backend: [
+          {
+            path: 'drupal',
+            modules: [
+              { name: 'decoupled_router', package: 'drupal/decoupled_router' },
+            ],
+            patches: [],
+          },
+        ],
+      },
+    ]
+    writeFileSync(file, JSON.stringify(old))
+    depend(root, 'druxt-router')
+    const { calls, exec } = tools(root, undefined, {
+      enabled: ['decoupled_router'],
+    })
+    const result = await drx(['remove', 'router', '--backend'], root, { exec })
+    expect(result.code).toBe(0)
+    // The record does not say who installed the package, so it stays.
+    expect(calls).toEqual([
+      'drupal$ ddev drush pmu -y decoupled_router',
+      'drupal$ ddev composer remove --no-update-with-dependencies drupal/decoupled_router',
+    ])
+    expect(result.stdout).toContain(
+      'The record does not say whether drx add installed druxt-router, so it was left. To take it out: npm uninstall druxt-router.'
+    )
+  })
+})
+
+describe('drx remove of what the site already had', () => {
+  test('keeps a package and a config entry that drx add found in place', async () => {
+    const root = project(
+      { engine: 'ddev' },
+      {
+        'drupal/composer.json': JSON.stringify({
+          require: {
+            'drupal/core-recommended': '~11',
+            'drupal/simple_oauth': '^6',
+          },
+        }),
+      }
+    )
+    depend(root, 'druxt-auth')
+    const before = snapshot(root)
+    const { calls, exec } = tools(root, undefined, {
+      enabled: ['simple_oauth'],
+    })
+    await drx(['add', 'auth'], root, { exec })
+    expect(config(root).modules[0].frontend).toEqual([
+      { path: 'nuxt', installed: false, listed: false },
+    ])
+    calls.length = 0
+
+    const result = await drx(['remove', 'auth', '--backend'], root, { exec })
+    expect(result.code).toBe(0)
+    expect(calls).toEqual([])
+    expect(result.stderr).toContain(
+      'druxt-auth was in package.json before drx add, so it stays.'
+    )
+    expect(result.stdout).toBe(
+      'Nothing to remove for auth: drx add found it in place.\n'
+    )
+    expect(config(root).modules).toBeUndefined()
+    const after = snapshot(root)
+    delete after['drx.config.json']
+    delete before['drx.config.json']
+    expect(after).toEqual(before)
+  })
+
+  test('refuses a module that is installed and has no record', async () => {
+    const root = project()
+    depend(root, 'druxt-blocks')
+    const before = snapshot(root)
+    const result = await drx(['remove', 'blocks'], root)
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain(
+      'Cannot remove blocks: drx add did not put druxt-blocks in this project, so there is nothing of its own to undo. Uninstall the package and take it out of the config by hand.'
+    )
+    expect(snapshot(root)).toEqual(before)
+  })
+
+  test('refuses a module that is only in node_modules', async () => {
+    const root = project(
+      { engine: 'ddev' },
+      { 'nuxt/node_modules/druxt-blocks/package.json': { version: '0.18.1' } }
+    )
+    const result = await drx(['remove', 'blocks'], root)
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain(
+      'Cannot remove blocks: druxt-blocks is not in this project.'
+    )
+  })
+})
+
+describe('drx remove --backend and what the backend still needs', () => {
+  test('leaves a module another enabled module depends on, and says which', async () => {
+    const root = project()
+    const { calls, asked, exec, enabled } = tools(root, undefined, {
+      dependents: { decoupled_router: ['druxt'] },
+    })
+    await drx(['add', 'router'], root, { exec })
+    calls.length = 0
+
+    const result = await drx(['remove', 'router', '--backend'], root, { exec })
+    expect(result.code).toBe(0)
+    expect(asked).toContain(
+      'drupal$ ddev drush pm:uninstall decoupled_router --simulate'
+    )
+    expect(calls).toEqual(['nuxt$ npm uninstall druxt-router'])
+    expect(enabled.has('decoupled_router')).toBe(true)
+    expect(result.stderr).toContain(
+      'decoupled_router stays enabled: druxt depends on it.'
+    )
+    // What stays keeps its record.
+    expect(config(root).modules).toEqual([
+      {
+        name: 'router',
+        package: 'druxt-router',
+        frontend: [],
+        backend: [
+          {
+            path: 'drupal',
+            modules: [
+              {
+                name: 'decoupled_router',
+                package: 'drupal/decoupled_router',
+                enabled: true,
+                required: true,
+              },
+            ],
+            patches: [],
+          },
+        ],
+      },
+    ])
+  })
+
+  test('uninstalls nothing when the backend cannot say what depends on it', async () => {
+    const root = project()
+    const { exec } = tools(root)
+    await drx(['add', 'router'], root, { exec })
+
+    const silent = tools(root, undefined, { unreadable: true })
+    const result = await drx(['remove', 'router', '--backend'], root, {
+      exec: silent.exec,
+    })
+    expect(result.code).toBe(0)
+    expect(silent.calls).toEqual(['nuxt$ npm uninstall druxt-router'])
+    expect(result.stdout).toBe(
+      [
+        'Removed router.',
+        '',
+        'Left to do:',
+        '  The backend could not say what depends on decoupled_router, so it was left enabled. Once nothing does: drush pm:uninstall decoupled_router, then composer remove drupal/decoupled_router',
+        '',
+      ].join('\n')
+    )
+    expect(config(root).modules[0].backend[0].modules).toHaveLength(1)
+  })
+
+  test('hands over what came up with a module that stays, and takes it all out last', async () => {
+    // Enabling decoupled_router brings path_alias up with it.
+    const root = project()
+    const { calls, exec } = tools(root, undefined, {
+      brings: { decoupled_router: ['path_alias'] },
+      dependents: { path_alias: ['decoupled_router'] },
+    })
+    await drx(['add', 'breadcrumb', '--no-patches'], root, { exec })
+    await drx(['add', 'router'], root, { exec })
+
+    await drx(['remove', 'breadcrumb', '--backend'], root, { exec })
+    // Nothing is left on the record of the module that is gone.
+    expect(config(root).modules).toHaveLength(1)
+    expect(
+      config(root).modules[0].backend[0].modules.map(
+        (module: { name: string }) => module.name
+      )
+    ).toEqual(['decoupled_router', 'path_alias'])
+
+    calls.length = 0
+    const last = await drx(['remove', 'router', '--backend'], root, { exec })
+    expect(last.code).toBe(0)
+    expect(calls).toEqual([
+      'nuxt$ npm uninstall druxt-router',
+      'drupal$ ddev drush pmu -y decoupled_router path_alias',
+      'drupal$ ddev composer remove --no-update-with-dependencies drupal/decoupled_router',
+    ])
+    expect(config(root).modules).toBeUndefined()
+  })
+
+  test('a module that was removed no longer holds what it needed', async () => {
+    const root = project()
+    const { calls, exec } = tools(root)
+    await drx(['add', 'breadcrumb', '--no-patches'], root, { exec })
+    // router was removed, and something of it was left on its record.
+    const file = join(root, 'drx.config.json')
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    saved.modules.push({
+      name: 'router',
+      package: 'druxt-router',
+      frontend: [],
+      backend: [
+        {
+          path: 'drupal',
+          modules: [{ name: 'path_alias', enabled: true, required: false }],
+          patches: [],
+        },
+      ],
+    })
+    writeFileSync(file, JSON.stringify(saved))
+
+    calls.length = 0
+    const result = await drx(['remove', 'breadcrumb', '--backend'], root, {
+      exec,
+    })
+    expect(result.stderr).not.toContain('router needs it')
+    expect(calls).toContain('drupal$ ddev drush pmu -y decoupled_router')
+  })
+
+  test('hands what stays to the module that still needs it', async () => {
+    // breadcrumb and router both need decoupled_router.
+    const root = project()
+    const { calls, exec } = tools(root)
+    await drx(['add', 'breadcrumb'], root, { exec })
+    await drx(['add', 'router'], root, { exec })
+    calls.length = 0
+
+    const first = await drx(['remove', 'breadcrumb', '--backend'], root, {
+      exec,
+    })
+    expect(first.code).toBe(0)
+    expect(calls).toEqual(['nuxt$ npm uninstall druxt-breadcrumb'])
+    expect(first.stderr).toContain('decoupled_router stays: router needs it.')
+    expect(config(root).modules).toEqual([
+      {
+        name: 'router',
+        package: 'druxt-router',
+        frontend: [{ path: 'nuxt', installed: true, listed: true }],
+        backend: [
+          {
+            path: 'drupal',
+            modules: [
+              {
+                name: 'decoupled_router',
+                package: 'drupal/decoupled_router',
+                enabled: true,
+                required: true,
+              },
+            ],
+            patches: [
+              {
+                package: 'drupal/decoupled_router',
+                description: PATCH.description,
+                url: PATCH.url,
+                module: 'decoupled_router',
+              },
+            ],
+          },
+        ],
+      },
+    ])
+
+    calls.length = 0
+    const second = await drx(['remove', 'router', '--backend'], root, { exec })
+    expect(second.code).toBe(0)
+    expect(calls).toEqual([
+      'nuxt$ npm uninstall druxt-router',
+      'drupal$ ddev drush pmu -y decoupled_router',
+      'drupal$ ddev composer remove --no-update-with-dependencies drupal/decoupled_router',
+      'drupal$ ddev composer patches-relock',
+    ])
+    expect(
+      JSON.parse(readFileSync(join(root, 'drupal/composer.json'), 'utf8')).extra
+    ).toEqual({})
+    expect(config(root).modules).toBeUndefined()
+  })
+})
+
+describe('drx add with no backend to look in', () => {
+  // The registry as it is published: no module is marked as core.
+  const published = () => {
+    server.files['/modules.json'] = JSON.stringify({
+      schemaVersion: 1,
+      modules: [
+        entry('menu', {
+          drupal: [
+            { name: 'jsonapi_menu_items', label: 'JSON:API Menu Items' },
+            { name: 'menu_link_content', label: 'Custom Menu Links' },
+          ],
+        }),
+      ],
+    })
+  }
+
+  test('plans the frontend and leaves the backend lines to the user', async () => {
+    published()
+    const root = project({ engine: 'none', baseUrl: 'https://example.com' })
+    const before = snapshot(root)
+    const result = await drx(['add', 'menu', '--dry-run'], root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toBe(
+      [
+        'Add menu (druxt-menu)',
+        '  nuxt/',
+        '    run   npm install druxt-menu',
+        "    edit  Add 'druxt-menu' to modules in nuxt.config.js",
+        '  drupal/',
+        '    The backend of this project is not on this machine. Where it is:',
+        '      composer require drupal/jsonapi_menu_items drupal/menu_link_content',
+        '      drush en -y jsonapi_menu_items menu_link_content',
+        '',
+        'Left to do:',
+        '  The module registry does not say whether jsonapi_menu_items or menu_link_content is part of core. Leave a module that is out of the composer require line: only the enable line applies to it.',
+        '',
+        'Nothing was changed: this was a dry run.',
+        '',
+      ].join('\n')
+    )
+    expect(snapshot(root)).toEqual(before)
+  })
+})
+
+describe('drx add and a patch that is not served over https', () => {
+  test('refuses before anything is written, naming the entry', async () => {
+    server.files['/modules.json'] = JSON.stringify({
+      schemaVersion: 1,
+      modules: [
+        entry('blocks', {
+          drupal: [{ name: 'block', label: 'Block', core: true }],
+        }),
+        entry('breadcrumb', {
+          drupal: [
+            {
+              name: 'decoupled_router',
+              label: 'Decoupled Router',
+              patches: [{ ...PATCH, url: 'http://example.com/mr/12.diff' }],
+            },
+          ],
+        }),
+      ],
+    })
+    const root = project()
+    const before = snapshot(root)
+    const result = await drx(['add', 'breadcrumb'], root)
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain(
+      'Cannot add breadcrumb: The patch "Fix the redirect loop" that decoupled_router needs is at http://example.com/mr/12.diff, and Composer only fetches a patch over https.'
+    )
+    expect(snapshot(root)).toEqual(before)
+
+    const without = await drx(['add', 'breadcrumb', '--no-patches'], root, {
+      exec: tools(root).exec,
+    })
+    expect(without.code).toBe(0)
+  })
+})
+
+describe('drx add --dry-run and what is left to the user', () => {
+  test('prints the line of a config that cannot be edited', async () => {
+    const root = project(
+      { engine: 'ddev' },
+      { 'nuxt/nuxt.config.js': 'export default () => ({ modules: [] })\n' }
+    )
+    const result = await drx(['add', 'blocks', '--dry-run'], root)
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(
+      [
+        'Left to do:',
+        "  Add 'druxt-blocks' to the modules array in nuxt.config.js. It could not be edited safely.",
+        '',
+        'Nothing was changed: this was a dry run.',
+      ].join('\n')
+    )
+  })
+})
+
+describe('the JSON of a step that failed', () => {
+  test('has the step, its exit code and what was and was not done', async () => {
+    const root = project()
+    const { exec } = tools(root, {
+      on: 'composer require drupal/decoupled_router',
+      output: 'Your requirements could not be resolved.',
+    })
+    const result = await drx(['add', 'router', '--json'], root, { exec })
+    expect(result.code).toBe(1)
+    expect(JSON.parse(result.stdout)).toEqual({
+      ok: false,
+      error: {
+        code: 'step-failed',
+        message: expect.stringContaining(
+          'ddev composer require drupal/decoupled_router failed in drupal/ with exit code 1.'
+        ),
+        failed: {
+          part: 'drupal',
+          step: 'ddev composer require drupal/decoupled_router',
+          exitCode: 1,
+          output: 'Your requirements could not be resolved.',
+        },
+        done: [
+          'nuxt/: npm install druxt-router',
+          "nuxt/: Add 'druxt-router' to modules in nuxt.config.js",
+        ],
+        notDone: [
+          'drupal/: ddev composer require drupal/decoupled_router',
+          'drupal/: ddev drush en -y decoupled_router',
+        ],
+      },
+    })
   })
 })

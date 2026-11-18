@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { loadConfig } from 'c12'
-import type { BackendRecord } from './adapters/adapter.js'
+import type { BackendRecord, PackageRecord } from './adapters/adapter.js'
 import { DrxError } from './errors.js'
 import { isLayout, LAYOUTS, type Layout } from './layouts.js'
 import { partsProblem, type Part } from './parts.js'
@@ -32,14 +32,64 @@ export interface ProjectConfig {
   modules?: ModuleRecord[]
 }
 
-/** One module the CLI added to the project. */
+/**
+ * One module the CLI added to the project, with what it did to each part.
+ * What it found in place is recorded as not done, so a remove leaves it.
+ */
 export interface ModuleRecord {
   /** The name of the module in the registry. */
   name: string
   /** Its frontend package. */
   package: string
+  /**
+   * What was done to each frontend part, by the part's path. Undefined in a
+   * record written before this was kept, which does not say.
+   */
+  frontend?: ({ path: string } & PackageRecord)[]
   /** What was done to each backend part, by the part's path. */
   backend: ({ path: string } & BackendRecord)[]
+}
+
+type Raw = Record<string, unknown>
+const rawList = (value: unknown): Raw[] =>
+  Array.isArray(value) ? value.filter(isRecord) : []
+
+/**
+ * A record as this version keeps it, read from any version's. An older one
+ * lists only the backend modules it required, all of which it also enabled,
+ * and has nothing on the frontend or on which module a patch was for.
+ */
+function moduleRecord(raw: Raw): ModuleRecord {
+  return {
+    name: raw.name as string,
+    package: raw.package as string,
+    ...(Array.isArray(raw.frontend)
+      ? {
+          frontend: rawList(raw.frontend).map((entry) => ({
+            path: String(entry.path),
+            installed: entry.installed === true,
+            listed: entry.listed === true,
+          })),
+        }
+      : {}),
+    backend: rawList(raw.backend).map((entry) => ({
+      path: String(entry.path),
+      modules: rawList(entry.modules).map((module) => ({
+        name: String(module.name),
+        ...(typeof module.package === 'string'
+          ? { package: module.package }
+          : {}),
+        enabled: module.enabled !== false,
+        required: module.required !== false,
+      })),
+      patches: rawList(entry.patches).map((patch) => ({
+        package: String(patch.package),
+        description: String(patch.description),
+        url: String(patch.url),
+        ...(typeof patch.module === 'string' ? { module: patch.module } : {}),
+      })),
+    })),
+  }
 }
 
 export async function writeProjectConfig(
@@ -128,6 +178,8 @@ export async function loadProjectConfig(root: string): Promise<ProjectConfig> {
     starter: config.starter as string,
     source: config.source as string,
     parts: config.parts as Part[],
-    ...(config.modules ? { modules: config.modules as ModuleRecord[] } : {}),
+    ...(config.modules
+      ? { modules: (config.modules as Raw[]).map(moduleRecord) }
+      : {}),
   }
 }

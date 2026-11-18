@@ -85,9 +85,13 @@ async function usage(
 }
 
 /** The code and message to report for anything a command throws. */
-function describe(error: unknown): { code: string; message: string } {
+function describe(error: unknown): {
+  code: string
+  message: string
+  [detail: string]: unknown
+} {
   if (error instanceof DrxError) {
-    return { code: error.code, message: error.message }
+    return { ...error.details, code: error.code, message: error.message }
   }
   // citty's own error for a bad argument or command. The class is not
   // exported, so it is recognised by name.

@@ -2,10 +2,11 @@ import { existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { adapterFor, type KindAdapter } from '../adapters/index.js'
-import type { BackendRecord, ModuleChange } from '../adapters/adapter.js'
+import type { Ask, BackendRecord, ModuleChange } from '../adapters/adapter.js'
 import type { CliContext } from '../context.js'
 import { engineFor } from '../engines/index.js'
 import { DrxError } from '../errors.js'
+import type { RunTool } from '../exec.js'
 import type { Output } from '../output.js'
 import type { Part } from '../parts.js'
 import {
@@ -34,6 +35,8 @@ export interface PartPlan {
   /** Why the steps cannot be taken from here, and the lines to run instead. */
   elsewhere?: { reason: string; lines: string[] }
   record?: BackendRecord
+  /** Asks the part what the steps did, once they have run. */
+  settle?: () => Promise<BackendRecord>
 }
 
 /** Why a module cannot be changed. `--force` goes past a forceable one. */
@@ -52,8 +55,22 @@ export interface ModulePlan {
   notes: string[]
   /** What is left for the user once the steps are done. */
   after: string[]
-  /** The record to keep, or to drop when it is undefined on a removal. */
+  /**
+   * The record once the steps are done: what the project's record of the
+   * module becomes. Undefined when nothing of it is left to keep.
+   */
   record?: ModuleRecord
+  /**
+   * What a removal leaves in a backend part for another module of the
+   * project that still needs it, to go on that module's record.
+   */
+  handOver: { to: string; path: string; record: BackendRecord }[]
+  /**
+   * Brings `record` in line with what the steps did, once they have run.
+   * A plan is made before anything is changed, and a part may do more than
+   * it was asked to.
+   */
+  settle?: () => Promise<void>
 }
 
 export interface Project {
@@ -70,6 +87,8 @@ export interface ChangeOptions {
   registry: ModuleEntry[]
   /** The names being changed in this run. */
   names: string[]
+  /** Runs a tool, to ask a backend part what it has. */
+  exec: RunTool
 }
 
 interface Located {
@@ -87,6 +106,83 @@ function located(project: Project, role: Part['role']): Located[] {
       ? [{ part, dir, adapter }]
       : []
   })
+}
+
+/**
+ * A way to ask a backend part what it has, through the engine that runs it.
+ * Undefined for a part that is not run from this machine.
+ */
+function asker(project: Project, at: Located, exec: RunTool): Ask | undefined {
+  const engine = at.part.engine ? engineFor(at.part.engine) : undefined
+  if (!engine?.local) return undefined
+  return (tool, args) => {
+    const line = engine.run(at.part, tool, args)
+    return exec(line.command, line.args, {
+      cwd: join(project.root, line.cwd),
+    })
+  }
+}
+
+const hasAny = (record: BackendRecord) =>
+  record.modules.length + record.patches.length > 0
+
+/** Two records of what was done to one backend part, as one. */
+function mergeBackend(a: BackendRecord, b: BackendRecord): BackendRecord {
+  const modules = a.modules.map((module) => ({ ...module }))
+  for (const module of b.modules) {
+    const same = modules.find(({ name }) => name === module.name)
+    if (!same) {
+      modules.push({ ...module })
+      continue
+    }
+    same.enabled ||= module.enabled
+    same.required ||= module.required
+    if (module.package) same.package = module.package
+  }
+  const key = (patch: BackendRecord['patches'][number]) =>
+    [patch.package, patch.description, patch.url].join('\n')
+  const patches = [...a.patches]
+  for (const patch of b.patches) {
+    if (!patches.some((other) => key(other) === key(patch))) patches.push(patch)
+  }
+  return { modules, patches }
+}
+
+/** One part's record folded into the list kept for a module. */
+function withBackend(
+  list: ModuleRecord['backend'],
+  path: string,
+  record: BackendRecord
+): ModuleRecord['backend'] {
+  const merged = mergeBackend(
+    list.find((entry) => entry.path === path) ?? { modules: [], patches: [] },
+    record
+  )
+  return [
+    ...list.filter((entry) => entry.path !== path),
+    ...(hasAny(merged) ? [{ path, ...merged }] : []),
+  ]
+}
+
+/**
+ * What a second add leaves on the record: everything either add did. A part
+ * the first add installed the package in is still one the CLI installed it
+ * in, though the second found it there.
+ */
+function mergeRecords(old: ModuleRecord, now: ModuleRecord): ModuleRecord {
+  const frontend = (now.frontend ?? []).map((entry) => {
+    const before = old.frontend?.find(({ path }) => path === entry.path)
+    return {
+      path: entry.path,
+      installed: entry.installed || before?.installed === true,
+      listed: entry.listed || before?.listed === true,
+    }
+  })
+  let backend = old.backend
+  for (const { path, ...record } of now.backend) {
+    backend = withBackend(backend, path, record)
+  }
+  return { name: now.name, package: now.package, frontend, backend }
 }
 
 const pluralPatches = (count: number) =>
@@ -175,6 +271,7 @@ function backendPlan(
       }
     }),
     ...(change.record ? { record: change.record } : {}),
+    ...(change.settle ? { settle: change.settle } : {}),
   }
 }
 
@@ -212,6 +309,7 @@ export async function planAdd(
     warnings: [],
     notes: [],
     after: [],
+    handOver: [],
   }
   if (module.archived) {
     plan.refusals.push({
@@ -227,6 +325,12 @@ export async function planAdd(
     return plan
   }
 
+  const record: ModuleRecord = {
+    name: module.name,
+    package: module.npm,
+    frontend: [],
+    backend: [],
+  }
   for (const at of located(project, 'frontend')) {
     const druxt = await at.adapter.druxt(at.dir)
     const fit = compatibility(module.druxt, druxt)
@@ -249,45 +353,64 @@ export async function planAdd(
     })
     absorb(plan, change)
     plan.parts.push(frontendPlan(at, change))
+    if (change.did) {
+      record.frontend?.push({ path: at.part.path, ...change.did })
+    }
   }
 
-  const record: ModuleRecord = {
-    name: module.name,
-    package: module.npm,
-    backend: [],
-  }
+  const backend: { path: string; part: PartPlan }[] = []
   for (const at of located(project, 'backend')) {
     const needs = module.backend.filter((need) => need.kind === at.part.kind)
     if (needs.length === 0) continue
+    const ask = asker(project, at, options.exec)
     const change = await at.adapter.addModule(at.dir, {
       needs,
       patches: options.patches,
       registryStatesCore: options.registryStatesCore,
+      ...(ask ? { ask } : {}),
     })
     const part = backendPlan(project, at, change)
-    // What is left by hand: first the commands for a backend that is
-    // elsewhere, then the setup the module needs wherever it runs.
-    plan.after.push(...elsewhereLines(part))
     absorb(plan, change)
     plan.parts.push(part)
-    const done = part.record
-    if (done && done.modules.length + done.patches.length > 0) {
-      record.backend.push({ path: at.part.path, ...done })
-    }
+    backend.push({ path: at.part.path, part })
   }
-  plan.record = record
+
+  // A module added before keeps what that add did: this one found it there.
+  const before = project.config.modules?.find(
+    (entry) => entry.name === module.name
+  )
+  const build = (): ModuleRecord => {
+    const now: ModuleRecord = {
+      ...record,
+      backend: backend.flatMap(({ path, part }) =>
+        part.record && hasAny(part.record) ? [{ path, ...part.record }] : []
+      ),
+    }
+    return before ? mergeRecords(before, now) : now
+  }
+  plan.record = build()
+  plan.settle = async () => {
+    for (const { part } of backend) {
+      if (part.settle) part.record = await part.settle()
+    }
+    plan.record = build()
+  }
   return plan
 }
 
-/** True when the project has the package of a module in a frontend part. */
-async function hasPackage(project: Project, name: string): Promise<boolean> {
+/** True when a frontend part of the project asks for a package. */
+async function declares(project: Project, name: string): Promise<boolean> {
   for (const at of located(project, 'frontend')) {
-    if (await at.adapter.package(at.dir, name)) return true
+    const found = await at.adapter.package(at.dir, name)
+    if (found && found.range !== null) return true
   }
   return false
 }
 
-/** Everything taking one module out of the project takes. */
+/**
+ * Everything taking one module out of the project takes: what the record
+ * says `drx add` did, and no more. What stays in place stays on the record.
+ */
 export async function planRemove(
   module: ModuleEntry,
   project: Project,
@@ -302,32 +425,49 @@ export async function planRemove(
     warnings: [],
     notes: [],
     after: [],
+    handOver: [],
   }
   const recorded = project.config.modules?.find(
     (entry) => entry.name === module.name
   )
-  const present = module.npm ? await hasPackage(project, module.npm) : false
-  if (!present && !recorded) {
+  if (!recorded) {
+    const there = module.npm ? await declares(project, module.npm) : false
     plan.refusals.push({
-      reason: `${module.npm ?? module.name} is not in this project.`,
+      reason: there
+        ? `drx add did not put ${module.npm} in this project, so there is nothing of its own to undo. Uninstall the package and take it out of the config by hand.`
+        : `${module.npm ?? module.name} is not in this project.`,
       forceable: false,
     })
     return plan
   }
 
   for (const at of located(project, 'frontend')) {
+    // A record with a frontend list says what was done to every part.
+    const did = recorded.frontend
+      ? (recorded.frontend.find(({ path }) => path === at.part.path) ?? {
+          installed: false,
+          listed: false,
+        })
+      : undefined
     const change = await at.adapter.removeModule(at.dir, {
       ...(module.npm ? { package: module.npm } : {}),
-      stillNeeded: [],
+      ...(did ? { did: { installed: did.installed, listed: did.listed } } : {}),
     })
     absorb(plan, change)
     plan.parts.push(frontendPlan(at, change))
   }
 
-  const backend = recorded?.backend ?? []
-  if (backend.length === 0) return plan
+  const keep = (backend: ModuleRecord['backend']) => {
+    if (backend.length === 0) return
+    plan.record = {
+      name: recorded.name,
+      package: recorded.package,
+      frontend: [],
+      backend,
+    }
+  }
   if (!options.backend) {
-    for (const entry of backend) {
+    for (const entry of recorded.backend) {
       const put = [
         ...entry.modules.map(({ name }) => name),
         ...(entry.patches.length > 0
@@ -339,32 +479,95 @@ export async function planRemove(
       )
     }
     // The record stays, so the backend can still be undone.
-    if (recorded) plan.record = recorded
+    keep(recorded.backend)
     return plan
   }
 
   // A backend module stays while any other module in the project needs it.
-  const stillNeeded = new Set<string>()
+  // A module is in the project while a frontend part asks for its package:
+  // a record alone may be what an earlier removal left behind.
+  const neededBy = new Map<string, string>()
   for (const other of options.registry) {
     if (options.names.includes(other.name) || !other.npm) continue
-    const kept =
-      (await hasPackage(project, other.npm)) ||
-      project.config.modules?.some((entry) => entry.name === other.name)
-    if (kept) for (const need of other.backend) stillNeeded.add(need.name)
+    if (other.npm === module.npm) continue
+    if (!(await declares(project, other.npm))) continue
+    for (const need of other.backend) {
+      if (!neededBy.has(need.name)) neededBy.set(need.name, other.name)
+    }
   }
-  for (const at of located(project, 'backend')) {
-    const entry = backend.find(({ path }) => path === at.part.path)
-    if (!entry) continue
+
+  let left: ModuleRecord['backend'] = []
+  for (const { path, ...entry } of recorded.backend) {
+    const at = located(project, 'backend').find(
+      (found) => found.part.path === path
+    )
+    if (!at) {
+      // The part is gone or has moved. Its record waits for it.
+      left = withBackend(left, path, entry)
+      continue
+    }
+
+    // What another module needs is set aside, with the patches written for
+    // it. A record that does not say what a patch was for keeps them all
+    // while any module stays.
+    const staying = entry.modules.filter(({ name }) => neededBy.has(name))
+    const stays = (patch: BackendRecord['patches'][number]) =>
+      patch.module
+        ? staying.some(({ name }) => name === patch.module)
+        : staying.length > 0
+    for (const [index, held] of staying.entries()) {
+      const by = neededBy.get(held.name) as string
+      plan.notes.push(`${held.name} stays: ${by} needs it.`)
+      const record: BackendRecord = {
+        modules: [held],
+        patches: entry.patches.filter((patch) =>
+          patch.module ? patch.module === held.name : index === 0
+        ),
+      }
+      // It goes on the record of the module that needs it, when that one
+      // has a record, so removing that module takes it out.
+      if (project.config.modules?.some(({ name }) => name === by)) {
+        plan.handOver.push({ to: by, path, record })
+      } else {
+        left = withBackend(left, path, record)
+      }
+    }
+
+    const ask = asker(project, at, options.exec)
     const change = await at.adapter.removeModule(at.dir, {
-      record: { modules: entry.modules, patches: entry.patches },
-      stillNeeded: [...stillNeeded],
+      record: {
+        modules: entry.modules.filter((held) => !staying.includes(held)),
+        patches: entry.patches.filter((patch) => !stays(patch)),
+      },
+      ...(ask ? { ask } : {}),
     })
-    const part = backendPlan(project, at, change)
-    plan.after.push(...elsewhereLines(part))
     absorb(plan, change)
-    plan.parts.push(part)
+    plan.parts.push(backendPlan(project, at, change))
+    if (!change.record) continue
+    // What the backend itself holds on to goes with what was handed over:
+    // it is held by a module that stays, and comes out when that one does.
+    const heir = plan.handOver.find((handed) => handed.path === path)
+    if (heir) {
+      heir.record = mergeBackend(heir.record, change.record)
+    } else {
+      left = withBackend(left, path, change.record)
+    }
   }
+  keep(left)
   return plan
+}
+
+/**
+ * Everything a plan leaves to the user: first the commands for a backend
+ * that is elsewhere, then what no tool could do and the setup a module needs.
+ */
+export function leftToDo(plan: ModulePlan): string[] {
+  return [...plan.parts.flatMap(elsewhereLines), ...plan.after]
+}
+
+/** True when carrying a plan out changes or runs something. */
+export function changesSomething(plan: ModulePlan): boolean {
+  return plan.parts.some((part) => part.steps.length > 0)
 }
 
 /** A plan as the lines a person reads before it is carried out. */
@@ -438,22 +641,29 @@ export async function carryOut(
               labels.length > 0
                 ? [title, ...labels.map((label) => `  ${label}`)]
                 : []
+            const finished = all.slice(0, done).map(({ label }) => label)
+            const pending = all.slice(done).map(({ label }) => label)
+            const shown = result.output.trimEnd()
             throw new DrxError(
               'step-failed',
               [
                 `${step.display} failed in ${part.path}/ with exit code ${result.code}.`,
-                result.output.trimEnd(),
-                ...list(
-                  'Done:',
-                  all.slice(0, done).map(({ label }) => label)
-                ),
-                ...list(
-                  'Not done:',
-                  all.slice(done).map(({ label }) => label)
-                ),
+                shown,
+                ...list('Done:', finished),
+                ...list('Not done:', pending),
               ]
                 .filter((line) => line !== '')
-                .join('\n')
+                .join('\n'),
+              {
+                failed: {
+                  part: part.path,
+                  step: step.display,
+                  exitCode: result.code,
+                  output: shown,
+                },
+                done: finished,
+                notDone: pending,
+              }
             )
           }
         }
@@ -463,10 +673,18 @@ export async function carryOut(
 
     // The record is written once the module is wholly done, so a remove
     // never undoes something an add did not finish.
-    const others = (config.modules ?? []).filter(
+    await plan.settle?.()
+    let modules = (config.modules ?? []).filter(
       (entry) => entry.name !== plan.module.name
     )
-    const modules = plan.record ? [...others, plan.record] : others
+    if (plan.record) modules = [...modules, plan.record]
+    for (const { to, path, record } of plan.handOver) {
+      modules = modules.map((entry) =>
+        entry.name === to
+          ? { ...entry, backend: withBackend(entry.backend, path, record) }
+          : entry
+      )
+    }
     const rest: ProjectConfig = { ...config }
     delete rest.modules
     config = modules.length > 0 ? { ...rest, modules } : rest

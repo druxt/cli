@@ -30,8 +30,9 @@ const add = (dir: string, name = 'druxt-breadcrumb') =>
     patches: true,
     registryStatesCore: false,
   })
-const remove = (dir: string, name = 'druxt-breadcrumb') =>
-  nuxt.removeModule(dir, { package: name, stillNeeded: [] })
+const DID = { installed: true, listed: true }
+const remove = (dir: string, name = 'druxt-breadcrumb', did = DID) =>
+  nuxt.removeModule(dir, { package: name, did })
 
 const runs = (change: ModuleChange) =>
   change.steps.flatMap((step) => ('run' in step ? [step.run] : []))
@@ -147,8 +148,31 @@ describe('adding a module to the Nuxt 2 config of the quickstart', () => {
       'package.json': { dependencies: { 'druxt-auth': '^0.4.0' } },
     })
     const content = edits(await remove(dir, 'druxt-auth'))[0]?.content
-    expect(content).not.toContain('druxt-auth')
-    expect(content).toContain("'druxt-site',")
+    // Its line goes, and every other line stays as it was written.
+    expect(content).toBe(
+      QUICKSTART.replace(
+        "    ['druxt-auth', { clientId: process.env.OAUTH_CLIENT_ID }],\n",
+        ''
+      )
+    )
+  })
+
+  test.each([
+    ["modules: ['a', 'druxt-breadcrumb', 'b']", "modules: ['a', 'b']"],
+    ["modules: ['druxt-breadcrumb', 'b']", "modules: ['b']"],
+    ["modules: ['a', 'druxt-breadcrumb']", "modules: ['a']"],
+    ["modules: ['druxt-breadcrumb']", 'modules: []'],
+    [
+      "modules: [\n    'a', // first\n    ['druxt-breadcrumb', { x: 1 }],\n    'b',\n  ]",
+      "modules: [\n    'a', // first\n    'b',\n  ]",
+    ],
+  ])('takes %j out and leaves the rest as written', async (before, after) => {
+    const wrap = (list: string) => `export default {\n  ${list},\n}\n`
+    const dir = part({
+      'nuxt.config.js': wrap(before),
+      'package.json': { dependencies: { 'druxt-breadcrumb': '^0.1.0' } },
+    })
+    expect(edits(await remove(dir))[0]?.content).toBe(wrap(after))
   })
 })
 
@@ -221,5 +245,45 @@ describe('a package the part already has', () => {
     const dir = part({ 'nuxt.config.js': QUICKSTART })
     const change = await remove(dir)
     expect(change.steps).toEqual([])
+  })
+
+  test('is recorded as found, and one that is added as done', async () => {
+    const had = part({
+      'package.json': { dependencies: { 'druxt-auth': '^0.5.1' } },
+      'nuxt.config.js': QUICKSTART,
+    })
+    expect((await add(had, 'druxt-auth')).did).toEqual({
+      installed: false,
+      listed: false,
+    })
+    expect((await add(had)).did).toEqual({ installed: true, listed: true })
+  })
+
+  test('stays on a remove when the record says the add found it', async () => {
+    const dir = part({
+      'package.json': { dependencies: { 'druxt-auth': '^0.5.1' } },
+      'nuxt.config.js': QUICKSTART,
+    })
+    const change = await remove(dir, 'druxt-auth', {
+      installed: false,
+      listed: false,
+    })
+    expect(change.steps).toEqual([])
+    expect(change.notes).toEqual([
+      'druxt-auth was in package.json before drx add, so it stays.',
+      'druxt-auth was in modules in nuxt.config.js before drx add, so it stays.',
+    ])
+  })
+
+  test('stays, with the lines to take it out, when the record does not say', async () => {
+    const dir = part({
+      'package.json': { dependencies: { 'druxt-auth': '^0.5.1' } },
+      'nuxt.config.js': QUICKSTART,
+    })
+    const change = await nuxt.removeModule(dir, { package: 'druxt-auth' })
+    expect(change.steps).toEqual([])
+    expect(change.manual).toEqual([
+      "The record does not say whether drx add installed druxt-auth, so it was left. To take it out: npm uninstall druxt-auth, and remove 'druxt-auth' from modules in nuxt.config.js.",
+    ])
   })
 })

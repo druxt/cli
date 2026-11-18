@@ -85,6 +85,7 @@ describe('loadProjectConfig', () => {
         {
           name: 'breadcrumb',
           package: 'druxt-breadcrumb',
+          frontend: [{ path: 'nuxt', installed: true, listed: false }],
           backend: [
             {
               path: 'drupal',
@@ -92,13 +93,17 @@ describe('loadProjectConfig', () => {
                 {
                   name: 'decoupled_router',
                   package: 'drupal/decoupled_router',
+                  enabled: false,
+                  required: true,
                 },
+                { name: 'block', enabled: true, required: false },
               ],
               patches: [
                 {
                   package: 'drupal/core',
                   description: 'Fix',
                   url: 'https://example.com/1.diff',
+                  module: 'decoupled_router',
                 },
               ],
             },
@@ -108,6 +113,62 @@ describe('loadProjectConfig', () => {
     }
     await writeProjectConfig(root, recorded)
     expect(await loadProjectConfig(root)).toEqual(recorded)
+  })
+
+  test('reads the record an older version wrote', async () => {
+    const root = tmp()
+    const patch = {
+      package: 'drupal/core',
+      description: 'Fix',
+      url: 'https://example.com/1.diff',
+    }
+    writeTree(root, {
+      'drx.config.json': {
+        ...config,
+        modules: [
+          {
+            name: 'breadcrumb',
+            package: 'druxt-breadcrumb',
+            backend: [
+              {
+                path: 'drupal',
+                modules: [
+                  {
+                    name: 'decoupled_router',
+                    package: 'drupal/decoupled_router',
+                  },
+                ],
+                patches: [patch],
+              },
+            ],
+          },
+          { name: 'blocks', package: 'druxt-blocks', backend: [] },
+        ],
+      },
+    })
+    // It required and enabled every module it listed, and kept nothing on
+    // the frontend, which stays absent: the record does not say.
+    expect((await loadProjectConfig(root)).modules).toEqual([
+      {
+        name: 'breadcrumb',
+        package: 'druxt-breadcrumb',
+        backend: [
+          {
+            path: 'drupal',
+            modules: [
+              {
+                name: 'decoupled_router',
+                package: 'drupal/decoupled_router',
+                enabled: true,
+                required: true,
+              },
+            ],
+            patches: [patch],
+          },
+        ],
+      },
+      { name: 'blocks', package: 'druxt-blocks', backend: [] },
+    ])
   })
 
   test.each([

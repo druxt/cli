@@ -1,3 +1,4 @@
+import type { ToolResult } from '../exec.js'
 import type { BackendModule } from '../modules/entry.js'
 import type { Role } from '../parts.js'
 
@@ -48,6 +49,12 @@ export interface ToolRun {
   args: string[]
 }
 
+/**
+ * Asks a part something by running one of its tools, with arguments that
+ * change nothing. It is how a plan finds out what the part has now.
+ */
+export type Ask = (tool: string, args: string[]) => Promise<ToolResult>
+
 /** A file of the part to write, with its whole new content. */
 export interface FileEdit {
   /** Relative to the part. */
@@ -67,22 +74,52 @@ export interface AddRequest {
   patches: boolean
   /** True when the registry marks core modules, so one not marked is not core. */
   registryStatesCore: boolean
+  /**
+   * Asks the part what it has. Undefined when the part is not run from this
+   * machine, so nothing in it can be looked at or changed from here.
+   */
+  ask?: Ask
 }
 
 export interface RemoveRequest {
   package?: string
-  /** What an earlier add did to this part, from the project's record. */
+  /**
+   * What an earlier add did to the package in this part. Undefined when the
+   * record does not say, as one written by an older version does not.
+   */
+  did?: PackageRecord
+  /** What an earlier add did to this backend part, and is to be undone. */
   record?: BackendRecord
-  /** Backend modules another installed module needs, which must stay. */
-  stillNeeded: string[]
+  ask?: Ask
+}
+
+/** What an add did about the package of a module in a frontend part. */
+export interface PackageRecord {
+  /** True when it installed the package, false when the part had it. */
+  installed: boolean
+  /** True when it listed the package in the config, false when it was there. */
+  listed: boolean
 }
 
 /** What an add did to a backend part, kept so a remove undoes that and no more. */
 export interface BackendRecord {
-  /** The modules it required and enabled, which were not there before. */
-  modules: { name: string; package: string }[]
-  /** The patches it wrote. */
-  patches: { package: string; description: string; url: string }[]
+  modules: {
+    name: string
+    /** The package that provides it. A module of core has none. */
+    package?: string
+    /** True when the add enabled it, false when it was enabled already. */
+    enabled: boolean
+    /** True when the add put its requirement in the manifest. */
+    required: boolean
+  }[]
+  /** The patches it wrote, each with the module it was for. */
+  patches: {
+    package: string
+    description: string
+    url: string
+    /** Absent in a record written before the module was kept. */
+    module?: string
+  }[]
 }
 
 /** The steps of a change to one part, in the order to take them. */
@@ -97,8 +134,19 @@ export interface ModuleChange {
   manual: string[]
   /** What is left to do once the change is made. */
   after: string[]
-  /** What to keep in the project's record. */
+  /** For an add, what the steps do to the package of the module. */
+  did?: PackageRecord
+  /**
+   * For an add, what the steps do to a backend part. For a remove, what
+   * they leave in it, which stays on the project's record.
+   */
   record?: BackendRecord
+  /**
+   * For an add, asks the part what the steps did once they have run, and
+   * gives the record to keep in place of `record`. A backend may enable more
+   * than it was asked to, and only then can that be seen.
+   */
+  settle?: () => Promise<BackendRecord>
 }
 
 export function emptyChange(): ModuleChange {

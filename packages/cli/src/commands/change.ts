@@ -4,6 +4,8 @@ import type { CliContext } from '../context.js'
 import { DrxError } from '../errors.js'
 import {
   carryOut,
+  changesSomething,
+  leftToDo,
   planAdd,
   planData,
   planLines,
@@ -68,22 +70,19 @@ const ARGS = {
 } satisfies Record<Action, ArgsDef>
 
 /** The modules of the registry that the picker offers for an action. */
-async function candidates(
+function candidates(
   action: Action,
   modules: ModuleEntry[],
-  project: Project,
-  options: ChangeOptions
-): Promise<ModuleEntry[]> {
+  project: Project
+): ModuleEntry[] {
   const sorted = [...modules].sort((a, b) => a.name.localeCompare(b.name))
   if (action === 'add') {
     return sorted.filter((module) => !module.archived && module.npm)
   }
-  const present: ModuleEntry[] = []
-  for (const module of sorted) {
-    const plan = await planRemove(module, project, options)
-    if (plan.refusals.length === 0) present.push(module)
-  }
-  return present
+  // What can be removed is what drx add recorded.
+  return sorted.filter((module) =>
+    project.config.modules?.some((entry) => entry.name === module.name)
+  )
 }
 
 /**
@@ -142,16 +141,12 @@ function changeCommand(
         ),
         registry: loaded.modules,
         names: [],
+        exec: context.exec,
       }
 
       const picked = names.length === 0
       if (picked) {
-        const offered = await candidates(
-          action,
-          loaded.modules,
-          project,
-          options
-        )
+        const offered = candidates(action, loaded.modules, project)
         if (offered.length === 0) {
           throw new DrxError(
             'usage',
@@ -205,13 +200,22 @@ function changeCommand(
         name: plan.module.name,
         package: plan.package,
         steps: planData(plan),
-        leftToDo: plan.after,
+        leftToDo: leftToDo(plan),
       }))
 
       if (dryRun) {
+        // The lines for a backend elsewhere are in the plan above already.
+        const byHand = plans.flatMap((plan) => plan.after)
         output.result(
           { ok: true, dryRun: true, modules: data },
-          [...shown, '', 'Nothing was changed: this was a dry run.'].join('\n')
+          [
+            ...shown,
+            ...(byHand.length > 0
+              ? ['', 'Left to do:', ...byHand.map((line) => `  ${line}`)]
+              : []),
+            '',
+            'Nothing was changed: this was a dry run.',
+          ].join('\n')
         )
         return
       }
@@ -231,11 +235,16 @@ function changeCommand(
 
       await carryOut(plans, project, context, output)
 
-      const left = plans.flatMap((plan) => plan.after)
+      const left = plans.flatMap(leftToDo)
       output.result(
         { ok: true, dryRun: false, modules: data },
         [
-          ...plans.map((plan) => `${words.did} ${plan.module.name}.`),
+          ...plans.map((plan) =>
+            // A removal with no step found everything in place before it.
+            action === 'remove' && !changesSomething(plan)
+              ? `Nothing to remove for ${plan.module.name}: drx add found it in place.`
+              : `${words.did} ${plan.module.name}.`
+          ),
           ...(left.length > 0
             ? ['', 'Left to do:', ...left.map((line) => `  ${line}`)]
             : []),
