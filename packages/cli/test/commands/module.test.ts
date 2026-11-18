@@ -431,7 +431,7 @@ describe('the module registry the commands read', () => {
 })
 
 describe('the module commands that are not built', () => {
-  test.each(['add', 'remove', 'configure'])(
+  test.each(['configure'])(
     'drx module %s says it is not available yet',
     async (command) => {
       const result = await drx(['module', command, 'blocks', '--json'])

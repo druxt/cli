@@ -49,6 +49,19 @@ describe.each(['ddev', 'lando'])('the %s engine', (name) => {
   })
 })
 
+describe('whether an engine runs on this machine', () => {
+  test('is true for all but the one for a backend that is elsewhere', () => {
+    expect(
+      knownEngines().map((name) => [name, engineFor(name)!.local])
+    ).toEqual([
+      ['php', true],
+      ['ddev', true],
+      ['lando', true],
+      ['none', false],
+    ])
+  })
+})
+
 describe('the none engine', () => {
   test('cannot run a tool, and says the backend is elsewhere', () => {
     const attempt = () => engineFor('none')!.run(part, 'drush', ['en', 'druxt'])

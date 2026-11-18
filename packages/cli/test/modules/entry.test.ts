@@ -127,4 +127,103 @@ describe('parseModuleRegistry', () => {
       `The module registry at ${AT} is invalid: ${message}.`
     )
   })
+
+  test('reads what a backend module needs done to add it', () => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [
+        {
+          name: 'jsonapi_menu',
+          label: 'Menu items',
+          composer: {
+            package: 'drupal/jsonapi_menu_items',
+            constraint: '^1.2',
+          },
+          setup: [
+            {
+              title: 'Create a consumer',
+              command: 'drush x',
+              url: 'https://example.com/doc',
+            },
+            { title: 'Save the keys' },
+          ],
+          patches: [
+            {
+              description: 'Fix a crash',
+              url: 'https://example.com/1.diff',
+              package: 'drupal/core',
+              issue: 'https://example.com/issue/1',
+              until: '11.3.0',
+            },
+            { description: 'Another', url: 'https://example.com/2.diff' },
+          ],
+        },
+      ]
+    })
+    expect(parseModuleRegistry(registry, AT)[1]?.backend).toEqual([
+      {
+        kind: 'drupal',
+        name: 'jsonapi_menu',
+        label: 'Menu items',
+        core: false,
+        composer: { package: 'drupal/jsonapi_menu_items', constraint: '^1.2' },
+        setup: [
+          {
+            title: 'Create a consumer',
+            command: 'drush x',
+            url: 'https://example.com/doc',
+          },
+          { title: 'Save the keys' },
+        ],
+        patches: [
+          {
+            description: 'Fix a crash',
+            url: 'https://example.com/1.diff',
+            package: 'drupal/core',
+            issue: 'https://example.com/issue/1',
+            until: '11.3.0',
+          },
+          { description: 'Another', url: 'https://example.com/2.diff' },
+        ],
+      },
+    ])
+  })
+
+  test.each([
+    [{ composer: 'drupal/x' }, 'composer must be an object'],
+    [{ composer: {} }, 'composer.package must be a non-empty string'],
+    [
+      { composer: { package: 'drupal/x', constraint: 1 } },
+      'composer.constraint must be a string',
+    ],
+    [{ setup: 'x' }, 'setup must be an array'],
+    [{ setup: [{}] }, 'setup[0].title must be a non-empty string'],
+    [
+      { setup: [{ title: 'x', command: 1 }] },
+      'setup[0].command must be a string',
+    ],
+    [{ patches: {} }, 'patches must be an array'],
+    [
+      { patches: [{ url: 'https://example.com/a.diff' }] },
+      'patches[0].description must be a non-empty string',
+    ],
+    [
+      { patches: [{ description: 'x', url: 'ftp://example.com/a.diff' }] },
+      'patches[0].url must be an http or https URL',
+    ],
+    [
+      {
+        patches: [
+          { description: 'x', url: 'https://example.com/a.diff', until: 1 },
+        ],
+      },
+      'patches[0].until must be a string',
+    ],
+  ])('names the bad field of a backend module in %j', (extra, message) => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [{ name: 'block', label: 'Block', ...extra }]
+    })
+    expect(() => parseModuleRegistry(registry, AT)).toThrow(
+      `The module registry at ${AT} is invalid: modules[1].drupal[0].${message}.`
+    )
+  })
 })

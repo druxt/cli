@@ -128,6 +128,52 @@ The Druxt version compared is the one installed in the part, or the range the pa
 
 The same table, for the modules whose name, package name or description contains the text. Case is ignored. It takes the options of `drx module list`.
 
+### `drx add <module...>`
+
+Adds one or more modules to the project, by registry name or package name. `drx module add` is the same command.
+
+```bash
+npx @druxt/cli add breadcrumb
+npx @druxt/cli add breadcrumb --dry-run
+```
+
+For each module it does two things:
+
+- **Frontend.** It installs the package with the package manager of the part's lock file, and adds the package to the `modules` array of `nuxt.config`. The rest of the file stays as you wrote it. When the config is a function, or its `modules` is not an array written out in the file, the package is installed, the file is left alone and the line to add is printed.
+- **Backend.** For each Drupal module the entry lists, a contributed one is required with Composer and enabled with Drush, and a core one is only enabled. The commands run through the part's engine: `ddev composer`, `lando drush`, or `composer` and `vendor/bin/drush` for the `php` engine.
+
+| Option                                           | What it does                                                                       |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| `--dry-run`                                      | Print every step, with each command line, and change nothing                       |
+| `--force`                                        | Add a module that is archived, or whose range does not admit the Druxt in the part |
+| `--no-patches`                                   | Leave out the patches the module needs, with a warning naming each                 |
+| `--yes`, `-y`                                    | Ask nothing                                                                        |
+| `--module-registry <url>`, `--refresh`, `--json` | As for `drx module list`                                                           |
+
+What it refuses, before it takes any step:
+
+- An archived module, and one whose Druxt range excludes the Druxt in the frontend part. `--force` adds either. A module whose range is `unknown` is added with a warning.
+- A module with no package, which is not released. `--force` does not change that.
+- A Drupal module it cannot place as core or contributed. See below.
+
+**Where the backend is not run from here.** With the `none` engine, or in a project that does not record an engine, the frontend is done and the Composer and Drush lines are printed under "Left to do", for you to run where the backend is.
+
+**Patches.** A Drupal module in the registry may list patches. `add` shows each with its issue and writes it to `extra.patches` in the site's `composer.json`. It then runs `composer patches-relock`. When the site lacks `cweagans/composer-patches`, it allows the plugin and requires it. A patch is skipped when the installed package is at or past the version that has the fix, and when the site already has the same patch.
+
+**Setup.** Steps a module needs done by hand, such as creating a consumer, are printed under "Left to do". They are not run.
+
+**When a tool fails.** The run stops there. The tool's output is printed, then what was done and what was not. Nothing is recorded for that module.
+
+**Core or contributed.** The registry marks a core module with `core: true`, and a registry that marks any module is taken to mark them all. Against a registry that marks none, which is the published one today, `add` looks in the core the site has installed, under `web/core/modules`, and treats a package the site already requires as contributed. With no core installed it refuses that module and says to install the backend's dependencies first, since the CLI does not keep a list of core modules to guess from.
+
+At a terminal with no name, `drx add` lists the modules to pick from, shows the steps and asks before it changes anything.
+
+### `drx remove <module...>`
+
+Takes a module out of the `modules` array and uninstalls its package. `drx module remove` is the same command. It takes `--dry-run`, `--yes`, `--module-registry`, `--refresh` and `--json`.
+
+The backend is left alone unless `--backend` is given. With it, `remove` uninstalls and removes only the Drupal modules that `drx add` required, and only the patches it wrote, which it knows from the record in `drx.config.json`. A Drupal module that another installed Druxt module needs stays.
+
 ### `drx module`
 
 With no command, at a terminal: a list of the modules that narrows as you type. Pick one and it is shown as `drx module info` shows it. Anywhere else it fails and names the commands.
@@ -153,7 +199,7 @@ Usage for the CLI or one command, and the version.
 `drx` with no command opens a menu when a person is at the terminal. It names the project you are in, which it reads from `drx.config.json`. Below that are the actions for where you are:
 
 - Outside a project: create a site.
-- Inside one: list, search or show modules, and show the project. Adding, removing and configuring a module and managing patches are listed as not available yet.
+- Inside one: list, search or show modules, and show the project. Add or remove modules. Configuring a module and managing patches are listed as not available yet.
 
 Each entry runs the command it stands for, so the menu and the commands cannot differ.
 
@@ -258,6 +304,8 @@ With `--json`, a failure prints `{ "ok": false, "error": { "code", "message" } }
 | `parts`   | Each part of the site: its `role` (`frontend` or `backend`), its `kind` and its `path` from the root |
 
 A kind is `nuxt` or `drupal` in this version.
+
+`drx add` keeps a record under `modules`, one entry for each module it added. An entry has the package, and for each backend part the Drupal modules `add` required and the patches it wrote. `drx remove --backend` undoes that and nothing else.
 
 A backend part also records the `engine` chosen at `init`, its `database` where the engine has one, and for the `none` engine the `baseUrl` of the backend. A file written before engines existed has none of the three and still reads. `drx info` prints them.
 
@@ -372,6 +420,15 @@ The registry is cached on disk:
 - When the registry cannot be read, the copy is used whatever its age, and the command says so and how old it is.
 - With no copy and no registry, the command fails.
 
+`drx add` reads four optional fields of a Drupal module in an entry, and works without them:
+
+| Field      | What it holds                                                                                                             |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `core`     | `true` for a module that is part of Drupal core                                                                           |
+| `composer` | The `package`, and a `constraint`, when the package is not `drupal/<name>`                                                |
+| `patches`  | Each a `description` and a `url`, with the `package` it applies to, its `issue` and the version it is fixed in as `until` |
+| `setup`    | Steps to do by hand once the module is enabled, each with a `title` and optionally a `command` and a `url`                |
+
 The copy is kept in `~/.cache/drx`, or under `XDG_CACHE_HOME` when that is set. `DRX_CACHE_DIR` names another directory.
 
 ## The user configuration
@@ -403,7 +460,11 @@ The copy is kept in `~/.cache/drx`, or under `XDG_CACHE_HOME` when that is set. 
 
 - The `split` and `workspace` layouts. `--layout` accepts them and fails with a message.
 - Sources other than `npm`.
-- `drx module add`, `drx module remove` and `drx module configure`. The commands exist and fail with a message.
+- `drx module configure`. The command exists and fails with a message. `drx add` does not ask for a module's options.
+- Commands to list, check and relock patches.
+- Running a module's setup steps. They are printed.
+- Adding to a Nuxt 4 site through Nuxt's own CLI. `drx add` edits `nuxt.config` itself, for Nuxt 2 and later alike.
+- A check that a Drupal module is already enabled. `drush en` is run for each one, and only the modules `drx add` required are recorded as its own.
 - Making a wrapper component and upgrading a site.
 - Kinds other than `nuxt` and `drupal`.
 - `init --setup`, which would run the engine's steps. The flag exists and fails with a message, and `init` prints the steps.

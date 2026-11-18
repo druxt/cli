@@ -75,12 +75,6 @@ describe('the nuxt adapter', () => {
   test('reports nothing for a directory with no package.json', async () => {
     expect(await nuxt.packages(tmp())).toEqual([])
   })
-
-  test('cannot add a module yet', async () => {
-    await expect(nuxt.addModule(tmp(), 'druxt-site')).rejects.toThrow(
-      'Adding a module is not available yet.'
-    )
-  })
 })
 
 describe('the drupal adapter', () => {
@@ -137,12 +131,6 @@ describe('the drupal adapter', () => {
       { name: 'drupal/core-recommended', range: '~11', installed: '11.2.4' },
       { name: 'drupal/druxt', range: '^1.2', installed: null },
     ])
-  })
-
-  test('cannot add a module yet', async () => {
-    await expect(drupal.addModule(tmp(), 'druxt')).rejects.toThrow(
-      'Adding a module is not available yet.'
-    )
   })
 })
 

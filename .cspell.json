@@ -18,7 +18,8 @@
     "**/CHANGELOG.md",
     "package-lock.json",
     ".vale/",
-    "packages/cli/starters/"
+    "packages/cli/starters/",
+    "packages/cli/test/fixtures/"
   ],
   "useGitignore": true
 }

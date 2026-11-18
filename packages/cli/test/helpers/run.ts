@@ -28,6 +28,12 @@ export async function run(
     cwd: tmp(),
     env: { XDG_CONFIG_HOME: tmp('drx-config-') },
     cacheDir: tmp('drx-cache-'),
+    // A test that expects a tool to run passes its own stand-in.
+    exec: async (command, args) => {
+      throw new Error(
+        `A real command was about to run: ${command} ${args.join(' ')}`
+      )
+    },
     stdout: { write: (chunk) => (stdout += chunk), ...tty },
     stderr: { write: (chunk) => (stderr += chunk), ...tty },
     interactive: terminal !== undefined,

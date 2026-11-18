@@ -486,6 +486,7 @@ async function runInit(
       text: counting(shared.prompter.text),
       select: counting(shared.prompter.select) as Prompter['select'],
       search: counting(shared.prompter.search) as Prompter['search'],
+      pickMany: shared.prompter.pickMany,
       confirm: counting(shared.prompter.confirm),
     },
   }

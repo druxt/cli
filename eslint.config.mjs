@@ -12,6 +12,7 @@ export default tseslint.config(
       'reports/**',
       '.vale/**',
       'packages/cli/starters/**',
+      'packages/cli/test/fixtures/**',
     ],
   },
   js.configs.recommended,
