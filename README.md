@@ -288,6 +288,8 @@ The package includes a copy of the public registry. When the public registry can
 
 The module commands read `https://cdn.jsdelivr.net/gh/druxt/modules@main/modules.json`, which the [druxt/modules](https://github.com/druxt/modules) repository publishes. The CLI reads `schemaVersion` 1. It refuses any other version with a message saying so, and ignores fields it has no use for.
 
+The names in an entry become arguments of a package manager or a backend tool, so each is checked as the registry is read. A package name has to be one npm takes, and the name of a Drupal module has to be a machine name. Anything else, such as a name that starts with a hyphen, makes the registry invalid, and the message names the entry and the field.
+
 The registry is cached on disk:
 
 - A copy under an hour old is used without a request. `--refresh` reads the registry anyway.

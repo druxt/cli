@@ -32,3 +32,21 @@ export function isInsidePath(value: unknown): value is string {
   const segments = value.split(/[\\/]/).filter((segment) => segment !== '.')
   return segments.some(Boolean) && !segments.includes('..')
 }
+
+/** npm's own limit on the length of a package name. */
+const NPM_NAME_LENGTH = 214
+const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/
+
+/**
+ * True for a name npm takes for a new package: lower case, URL-safe, with an
+ * optional scope, and starting with a letter or a digit. A name is handed to
+ * a package manager as an argument, so one that starts with a hyphen, or has
+ * a space or a character a shell reads, is not a name.
+ */
+export function isNpmName(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= NPM_NAME_LENGTH &&
+    NPM_NAME.test(value)
+  )
+}
