@@ -1,5 +1,7 @@
-import { spawnSync } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,13 +34,49 @@ const run = (...flags: string[]) => {
   return { status: result.status, out: result.stdout + result.stderr }
 }
 
+let server: Server | undefined
+
 beforeEach(() => {
   dir = fs.mkdtempSync(join(os.tmpdir(), 'release-check-'))
 })
 
-afterEach(() => {
+afterEach(async () => {
   fs.rmSync(dir, { recursive: true, force: true })
+  const closing = server
+  server = undefined
+  if (closing) {
+    closing.closeAllConnections()
+    await new Promise((resolve) => closing.close(resolve))
+  }
 })
+
+// A registry on a loopback port. The script runs without blocking this
+// process, which has to answer it, and a script that hangs is killed.
+const runAgainst = async (
+  answer: Parameters<typeof createServer>[1],
+  ...flags: string[]
+) => {
+  server = createServer(answer)
+  const listening = server
+  await new Promise<void>((resolve) =>
+    listening.listen(0, '127.0.0.1', resolve)
+  )
+  const { port } = listening.address() as AddressInfo
+  return new Promise<{ status: number | string | null; out: string }>(
+    (resolve) => {
+      execFile(
+        process.execPath,
+        [SCRIPT, dir, `--registry=http://127.0.0.1:${port}`, ...flags],
+        { encoding: 'utf8', timeout: 10000 },
+        (error, stdout, stderr) =>
+          resolve({
+            status: error ? (error.killed ? 'killed' : error.code!) : 0,
+            out: stdout + stderr,
+          })
+      )
+    }
+  )
+}
 
 describe('release-check', () => {
   test('passes a publishable package', () => {
@@ -253,5 +291,122 @@ describe('release-check', () => {
       { encoding: 'utf8' }
     )
     expect(result.stdout).toBe('x@1.2.1\ny@0.1.0\n')
+  })
+
+  test.each([
+    '../druxt',
+    './vendor/druxt',
+    '/srv/druxt',
+    '~/druxt',
+    '..\\druxt',
+    'C:\\code\\druxt',
+    'druxt-0.25.0.tgz',
+  ])('refuses the local path %s', (range) => {
+    write({ name: 'x', version: '1.0.0', dependencies: { druxt: range } })
+    const result = run('--skip-files')
+    expect(result.status).toBe(1)
+    expect(result.out).toContain('does not resolve from npm')
+  })
+
+  test.each([
+    '^0.24.0',
+    '>=0.25.1 <1',
+    '1.x',
+    '*',
+    'latest',
+    'next',
+    'npm:druxt-next@^1.0.0',
+    'npm:@druxt/core@0.25.0',
+  ])('passes the range, tag or alias %s', (range) => {
+    write({ name: 'x', version: '1.0.0', dependencies: { druxt: range } })
+    expect(run('--skip-files').status).toBe(0)
+  })
+
+  test('refuses a declared entry point that is not in the package', () => {
+    write({
+      name: 'x',
+      version: '1.0.0',
+      files: ['dist'],
+      bin: { x: './dist/bin.js' },
+      main: './dist/index.js',
+      types: './dist/index.d.ts',
+      exports: {
+        '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+        './tools': { import: { default: './dist/tools.js' } },
+        './components/*': './dist/components/*',
+        './package.json': './package.json',
+      },
+    })
+    fs.mkdirSync(join(dir, 'dist'))
+    fs.writeFileSync(join(dir, 'dist', 'index.js'), '')
+    fs.writeFileSync(join(dir, 'dist', 'index.d.ts'), '')
+
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.out).toContain(
+      'bin.x is "./dist/bin.js", which is not among the files npm would pack.'
+    )
+    expect(result.out).toContain(
+      'exports["./tools"].import.default is "./dist/tools.js", which is not among the files npm would pack.'
+    )
+    expect(result.out).not.toContain('index')
+    expect(result.out).not.toContain('components')
+
+    fs.writeFileSync(join(dir, 'dist', 'bin.js'), '')
+    fs.writeFileSync(join(dir, 'dist', 'tools.js'), '')
+    expect(run()).toEqual({
+      status: 0,
+      out: 'release-check: x@1.0.0 can publish.\n',
+    })
+  })
+
+  test('refuses an entry point that exists and is left out of the package', () => {
+    write({
+      name: 'x',
+      version: '1.0.0',
+      files: ['dist'],
+      exports: { '.': './src/index.js' },
+    })
+    fs.mkdirSync(join(dir, 'dist'))
+    fs.writeFileSync(join(dir, 'dist', 'index.js'), '')
+    fs.mkdirSync(join(dir, 'src'))
+    fs.writeFileSync(join(dir, 'src', 'index.js'), '')
+    const result = run()
+    expect(result.status).toBe(1)
+    expect(result.out).toContain(
+      'exports["."] is "./src/index.js", which is not among the files npm would pack.'
+    )
+  })
+
+  test('reads the registry it is given', async () => {
+    write({ name: 'x', version: '1.1.9' })
+    const result = await runAgainst((request, response) => {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(
+        JSON.stringify({
+          'dist-tags': { latest: '1.2.0' },
+          versions: { '1.2.0': {} },
+        })
+      )
+    }, '--skip-files')
+    expect(result.out).toContain('does not rise above the published 1.2.0')
+    expect(result.status).toBe(1)
+  })
+
+  test('fails when the registry closes before its answer is complete', async () => {
+    write({ name: 'x', version: '1.1.9' })
+    const result = await runAgainst((request, response) => {
+      response.writeHead(200, {
+        'content-type': 'application/json',
+        'content-length': '4096',
+      })
+      response.write('{"dist-tags": {"latest": "1.2.0"}, "versions": {', () =>
+        response.socket?.destroy()
+      )
+    }, '--skip-files')
+    expect(result.out).toContain(
+      'release-check: npm closed the connection before its answer for x was complete.'
+    )
+    expect(result.out).not.toContain('can publish')
+    expect(result.status).toBe(1)
   })
 })
