@@ -9,9 +9,13 @@ name: CI
 
 on:
   push:
-    branches: ["0.x"]
+    # A release line is <major>.x, or <major>.<minor>.x when an old minor needs
+    # a patch. The pattern matches both, as * matches dots.
+    branches: ["*.x"]
+  # No branch filter on purpose. The filter matches the pull request's base, so
+  # a pull request stacked on another branch would run no jobs, and show no
+  # checks rather than failing ones.
   pull_request:
-    branches: ["0.x"]
 
 permissions:
   contents: read
