@@ -4,6 +4,10 @@
   "private": true,
   "description": "Workspace for @druxt/cli, the Druxt command-line tool, and create-druxt.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/druxt/cli.git"
+  },
   "type": "module",
   "workspaces": [
     "packages/cli",
@@ -27,6 +31,8 @@
     "lint:prose": "PROSE_LINT_GLOB='!.changeset/README.md' bash .gitlab/scripts/lint-prose.sh --all",
     "lint:prose:install": "bash .gitlab/scripts/install-vale.sh .vale/bin .vale/styles",
     "postinstall": "node scripts/postinstall.mjs",
+    "release:check": "node scripts/release-check.mjs packages/cli packages/create-druxt",
+    "release:version": "changeset version && npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
     "test": "vitest run --coverage",
     "test:e2e": "DRX_E2E=1 vitest run packages/cli/test/e2e",
     "typecheck": "tsc --noEmit"
@@ -47,6 +53,7 @@
     "eslint-config-prettier": "10.1.8",
     "globals": "17.14.0",
     "knip": "6.45.1",
+    "markdown-it": "14.3.3",
     "markdownlint-cli2": "0.24.1",
     "prettier": "3.10.1",
     "typescript": "6.0.3",
