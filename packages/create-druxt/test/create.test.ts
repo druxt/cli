@@ -30,7 +30,9 @@ describe('create-druxt', () => {
       return true
     })
     expect(await createDruxt(['--help'])).toBe(0)
-    expect(printed).toContain('drx init')
     expect(printed).toContain('--starter')
+    // The usage is headed by the name it was started under.
+    expect(printed).toContain('create-druxt [OPTIONS]')
+    expect(printed).not.toContain('drx init')
   })
 })

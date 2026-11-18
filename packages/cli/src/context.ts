@@ -53,6 +53,11 @@ export interface CliContext {
   download: typeof downloadTemplate
   /** Installs the dependencies of the site in a directory. */
   install: (dir: string) => Promise<void>
+  /**
+   * Set by a binary that runs one command under a name of its own, so the
+   * usage of that command is headed by the name the user typed.
+   */
+  startedAs?: { command: string; name: string }
 }
 
 export function defaultContext(): CliContext {
