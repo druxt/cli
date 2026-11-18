@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# The fast half of CI: every linter, the type check, then the unit tests.
+#
+# The end-to-end test is not here. It downloads a real starter over the
+# network, and a hook that needs the network gets bypassed with --no-verify.
+set -e
+npm run --silent lint
+npm run --silent typecheck
+npm test --silent
