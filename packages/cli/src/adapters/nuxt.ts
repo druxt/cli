@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import {
   addModuleNotAvailable,
   type KindAdapter,
@@ -23,6 +23,20 @@ async function declared(dir: string): Promise<Record<string, string>> {
   }
 }
 
+/**
+ * The package.json of an installed package, as Node finds it from `dir`: in
+ * the nearest node_modules on the way up, which is the project's root when
+ * its workspaces are hoisted.
+ */
+async function installedManifest(dir: string, name: string) {
+  for (let from = resolve(dir); ; from = dirname(from)) {
+    const manifest = await readJsonObject(
+      join(from, 'node_modules', name, 'package.json')
+    )
+    if (manifest || dirname(from) === from) return manifest
+  }
+}
+
 export const nuxtAdapter: KindAdapter = {
   kind: 'nuxt',
   role: 'frontend',
@@ -42,9 +56,7 @@ export const nuxtAdapter: KindAdapter = {
 
     const versions: PackageVersion[] = []
     for (const name of names) {
-      const installed = await readJsonObject(
-        join(dir, 'node_modules', name, 'package.json')
-      )
+      const installed = await installedManifest(dir, name)
       versions.push({
         name,
         range: ranges[name] ?? null,
