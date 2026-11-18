@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import {
   addModuleNotAvailable,
   type KindAdapter,
@@ -26,14 +26,26 @@ async function declared(dir: string): Promise<Record<string, string>> {
   }
 }
 
-/** The version of a package in the part's node_modules, or null. */
+/**
+ * The package.json of an installed package, as Node finds it from `dir`: in
+ * the nearest node_modules on the way up, which is the project's root when
+ * its workspaces are hoisted.
+ */
+async function installedManifest(dir: string, name: string) {
+  for (let from = resolve(dir); ; from = dirname(from)) {
+    const manifest = await readJsonObject(
+      join(from, 'node_modules', name, 'package.json')
+    )
+    if (manifest || dirname(from) === from) return manifest
+  }
+}
+
+/** The version of a package installed for the part, or null. */
 async function installedVersion(
   dir: string,
   name: string
 ): Promise<string | null> {
-  const manifest = await readJsonObject(
-    join(dir, 'node_modules', name, 'package.json')
-  )
+  const manifest = await installedManifest(dir, name)
   return typeof manifest?.version === 'string' ? manifest.version : null
 }
 

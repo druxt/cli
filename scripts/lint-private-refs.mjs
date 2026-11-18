@@ -33,10 +33,13 @@ const ALLOWED = [
 
 /** Hosts nobody outside the author's network can resolve. */
 const PRIVATE_HOST = [
-  /^[a-z0-9-]+(\.[a-z0-9-]+)*\.(local|internal|lan|home|corp|intranet)$/i,
+  // With or without labels before it: `http://intranet/` is a private name too.
+  /^([a-z0-9-]+\.)*(local|internal|lan|home|corp|intranet)$/i,
   /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/,
   /^192\.168\.\d{1,3}\.\d{1,3}$/,
   /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/,
+  // Link-local, as fe80::/10 is below.
+  /^169\.254\.\d{1,3}\.\d{1,3}$/,
   /^f[cd][0-9a-f]{2}:/i,
   /^fe[89ab][0-9a-f]:/i,
 ]
@@ -50,8 +53,9 @@ const PRIVATE_HOST = [
  */
 // The bracket class takes dots as well as hex: an IPv4-mapped literal such as
 // [::ffff:10.0.0.8] is a bracketed host that carries an RFC1918 address.
+// A scheme is read in any case, as a URL parser reads it.
 const URL_HOST =
-  /(?:[a-z][a-z0-9+.-]*:\/\/(?:[^/@\s]*@)?|\bgit@)(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)/g
+  /(?:[a-z][a-z0-9+.-]*:\/\/(?:[^/@\s]*@)?|\bgit@)(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)/gi
 
 /**
  * The IPv4 address inside an IPv4-mapped IPv6 literal, else the host as given.
@@ -75,6 +79,9 @@ export function mappedToIpv4(host) {
   const [head, tail] = text.split('::')
   const left = head ? head.split(':') : []
   const right = tail === undefined ? [] : tail ? tail.split(':') : []
+  // `::` stands for at least one group, so more than seven beside it is not an
+  // address, and there is nothing to fill.
+  if (tail !== undefined && left.length + right.length > 7) return host
   const groups =
     tail === undefined
       ? left

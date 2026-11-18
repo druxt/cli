@@ -169,9 +169,12 @@ jobs:
       - name: Pack the tarballs
         if: steps.snapshot.outputs.version != ''
         run: |
-          mkdir dev-package
+          # A directory per package, named after the package's own, so the
+          # publishing job takes them in the order of packages/: @druxt/cli
+          # before create-druxt, which depends on that snapshot of it.
           while read -r release dir; do
-            npm pack --workspace "$dir" --pack-destination dev-package
+            mkdir -p "dev-package/${dir##*/}"
+            npm pack --workspace "$dir" --pack-destination "dev-package/${dir##*/}"
             echo "Packed $release" >> "$GITHUB_STEP_SUMMARY"
           done < "$RUNNER_TEMP/snapshot"
 
@@ -215,19 +218,28 @@ jobs:
           path: dev-package
 
       # The leading ./ matters: npm reads a bare "dir/file.tgz" as the GitHub
-      # shorthand "user/repo" and tries to clone it.
+      # shorthand "user/repo" and tries to clone it. A snapshot npm already
+      # has is skipped, so a rerun after one package published and the next
+      # failed goes on to the one that is missing.
       - name: Publish under the dev tag
         shell: bash
         run: |
-          for file in dev-package/*.tgz; do
+          for file in dev-package/*/*.tgz; do
+            release="$(tar -xzOf "$file" package/package.json | node -p "const p = JSON.parse(require('fs').readFileSync(0, 'utf8')); p.name + '@' + p.version")"
+            if [ -n "$(npm view "$release" version 2>/dev/null)" ]; then
+              echo "- $release (already on npm)" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
             npm publish "./$file" --tag dev --access public
+            echo "- $release (published, \`dev\`)" >> "$GITHUB_STEP_SUMMARY"
           done
-          echo "Published under the dev tag." >> "$GITHUB_STEP_SUMMARY"
 
   # Opens or updates the version pull request. It holds a token that can write
   # to the repository, and the changesets action leaves that token on disk, so
-  # this job installs without scripts, runs nothing but the changesets tooling,
-  # and builds and packs nothing. The pack job does that, read-only.
+  # this job installs without scripts and builds and packs nothing. The pack
+  # job does that, read-only. What it does run from the repository is what
+  # versioning needs: the `release:version` script and the changelog generator
+  # that changesets loads, both as the release branch has them.
   version:
     if: ${{ !github.event.repository.fork && github.event_name == 'push' }}
     runs-on: ubuntu-latest
@@ -424,6 +436,19 @@ jobs:
           for out in release-package/*; do
             tag="$(cat "$out/tag")"
             dist_tag="$(cat "$out/dist-tag")"
+            # The dist-tag was chosen when the tarball was packed, and the
+            # approval can come much later. Another release line may have
+            # published a higher version since, and an explicit `latest`
+            # would move the tag back to this one. Ask npm again.
+            if [ "$dist_tag" = latest ]; then
+              latest="$(npm view "${tag%@*}" dist-tags.latest 2>/dev/null || true)"
+              dist_tag="$(node -e '
+                const core = (version) => version.split("-")[0].split(".").map(Number)
+                const [version, latest] = process.argv.slice(1).map((v) => v && core(v))
+                const below = latest && (version[0] - latest[0] || version[1] - latest[1] || version[2] - latest[2]) < 0
+                console.log(below ? "latest-" + version[0] : "latest")
+              ' "${tag##*@}" "$latest")"
+            fi
             if [ -n "$(npm view "$tag" version 2>/dev/null)" ]; then
               state="already on npm"
             else

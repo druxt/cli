@@ -113,7 +113,8 @@ function resolveNamedUrl(
   named: Record<string, string>,
   config: UserConfig
 ): string {
-  const url = named[value]
+  // An own key only: every object has a `constructor`.
+  const url = Object.hasOwn(named, value) ? named[value] : undefined
   if (url) return url
   if (isHttpUrl(value)) return value
   const names = Object.keys(named).sort()

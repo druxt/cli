@@ -43,3 +43,4 @@ repatch
 autobuild
 linkify
 SARIF
+gpgsign

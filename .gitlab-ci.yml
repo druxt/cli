@@ -138,11 +138,14 @@ lint:yaml:
 lint:commit:
   extends: .node
   stage: lint
+  # Full history, so the merge base is present and no commit is cut off.
+  variables:
+    GIT_DEPTH: 0
   rules:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
   script:
     - section_start "commitlint" "Validating commit messages"
-    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth 50
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - npm run lint:commit -- --from "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --to HEAD --verbose
     - section_end "commitlint"
 
@@ -247,6 +250,10 @@ secret-detection:
   interruptible: true
   dependencies: []
   variables:
+    # Full history. gitleaks reads the commits the clone holds, and the default
+    # clone holds the last 20, so a credential added and removed earlier in a
+    # longer push would never be read.
+    GIT_DEPTH: 0
     GITLEAKS_VERSION: '8.30.1'
     GITLEAKS_SHA256: '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb'
   script:
