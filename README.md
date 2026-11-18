@@ -59,7 +59,7 @@ At a terminal, `init` is a guided run. It asks for whatever the flags left out, 
 npx @druxt/cli init my-site --yes --json
 ```
 
-With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither. See [CI and scripts](#ci-and-scripts).
+With no terminal, `init` uses the defaults and never waits for input. It needs the directory or `--yes`, and fails with a message saying so when it has neither. The message names what kept it from asking: no terminal, `--json`, or the flag or variable that turned the questions off. See [CI and scripts](#ci-and-scripts).
 
 #### Engines
 

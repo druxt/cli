@@ -436,9 +436,15 @@ async function runInit(
   // --json never asks: a script reading stdout cannot answer.
   const canAsk = shared.interactive && !options.yes && !output.json
   if (!options.dir && !canAsk && !options.yes) {
+    // Why nothing was asked: the terminal may be there and the questions off.
+    const why = shared.questionsOff
+      ? `, and ${shared.questionsOff} turns the questions off`
+      : shared.interactive
+        ? ', and nothing is asked with --json'
+        : ' and there is no terminal to ask on'
     throw new DrxError(
       'usage',
-      'No directory was given and there is no terminal to ask on. Pass a directory, as in "drx init my-site", or --yes to use the default of the starter.'
+      `No directory was given${why}. Pass a directory, as in "drx init my-site", or --yes to use the default of the starter.`
     )
   }
   if (options.setup) {

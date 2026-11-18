@@ -102,20 +102,20 @@ function describe(error: unknown): { code: string; message: string } {
 const NO_INTERACTIVE = '--no-interactive'
 
 /**
- * Whether anything may be asked. A terminal is needed, and `CI`,
- * `DRX_NO_INTERACTIVE` and `--no-interactive` each say no whatever the
- * terminal is. A command then takes its defaults, and fails naming the flag
- * of a value that has none.
+ * What says nothing may be asked although there is a terminal: `CI`,
+ * `DRX_NO_INTERACTIVE` or `--no-interactive`, each of which says no whatever
+ * the terminal is. A command then takes its defaults, and fails naming the
+ * flag of a value that has none. Undefined when nothing turned the questions
+ * off, or when there is no terminal to ask on in the first place.
  */
-function mayAsk(context: CliContext, argv: string[]): boolean {
-  const off = (value: string | undefined) =>
+function questionsOff(context: CliContext, argv: string[]): string | undefined {
+  const on = (value: string | undefined) =>
     value !== undefined && value !== '' && value !== '0' && value !== 'false'
-  return (
-    context.interactive &&
-    !argv.includes(NO_INTERACTIVE) &&
-    !off(context.env.DRX_NO_INTERACTIVE) &&
-    !off(context.env.CI)
-  )
+  if (!context.interactive) return undefined
+  if (argv.includes(NO_INTERACTIVE)) return NO_INTERACTIVE
+  if (on(context.env.DRX_NO_INTERACTIVE)) return 'DRX_NO_INTERACTIVE'
+  if (on(context.env.CI)) return 'CI'
+  return undefined
 }
 
 /** Runs one command line in a context that is already settled. */
@@ -171,8 +171,13 @@ export async function runCli(
   overrides: Partial<CliContext> = {}
 ): Promise<number> {
   const context = { ...defaultContext(), ...overrides }
+  const off = questionsOff(context, argv)
   return execute(
     argv.filter((argument) => argument !== NO_INTERACTIVE),
-    { ...context, interactive: mayAsk(context, argv) }
+    {
+      ...context,
+      interactive: context.interactive && off === undefined,
+      ...(off === undefined ? {} : { questionsOff: off }),
+    }
   )
 }

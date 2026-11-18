@@ -53,6 +53,11 @@ export interface CliContext {
   stderr: TextStream
   /** True when a person is at the terminal to answer a prompt. */
   interactive: boolean
+  /**
+   * The flag or variable that turned the questions off when there is a
+   * terminal to ask on. Undefined when nothing did, or there is none.
+   */
+  questionsOff?: string
   /** The running Node version, without the leading `v`. */
   nodeVersion: string
   now: () => Date
