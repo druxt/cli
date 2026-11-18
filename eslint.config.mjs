@@ -24,5 +24,11 @@ export default tseslint.config(
       sourceType: 'module',
       globals: globals.node,
     },
+  },
+  {
+    // The changelog generator: changesets loads it as CommonJS.
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
   }
 )
