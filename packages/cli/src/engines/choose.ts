@@ -8,6 +8,7 @@ import {
   type StarterEntry,
 } from '../registry/entry.js'
 import { isHttpUrl } from '../validate.js'
+import { trimEndSlashes } from '../slashes.js'
 
 /** What the flags say about the engine. Each is undefined when not given. */
 export interface EngineOptions {
@@ -234,7 +235,7 @@ export function stepLines(steps: EngineStep[]): string[] {
   const lines: string[] = []
   let here = ''
   for (const step of steps) {
-    const dir = typeof step === 'string' ? '' : step.dir.replace(/\/+$/, '')
+    const dir = typeof step === 'string' ? '' : trimEndSlashes(step.dir)
     if (dir !== here) {
       const back = here
         .split('/')
