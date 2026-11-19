@@ -11,6 +11,7 @@ export type DrxErrorCode =
   | 'download'
   | 'install'
   | 'cancelled'
+  | 'node'
 
 /**
  * A failure the user can act on. Its message is printed as it is, with no

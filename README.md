@@ -33,7 +33,7 @@ You will need Node 22.12 or newer to run the CLI. The site it creates has its ow
 
 `drx` runs on Node 22.12 or later. A site may pin an older Node for itself, as the 0.x starter pins Node 16, and a version manager then switches to it in the site's directory. `drx` still works there: started on an older Node, it runs the same command again on a newer Node from the machine. It looks beside its own binary first, which is the Node it was installed with, then along `PATH`, then where mise, nvm, fnm, Volta and asdf keep their installs.
 
-The tools a command starts, such as the site's package manager, come from your own `PATH`, so the site is installed with the Node it runs on. Set `DRX_NODE` to the path of a `node` binary to choose the Node `drx` runs on yourself.
+The tools a command starts, such as the site's package manager, come from your own `PATH`, so the site is installed with the Node it runs on. When the Node you are on is too old, `DRX_NODE` chooses the newer one: set it to the path of a `node` binary. A Node that is new enough is used as it is, whatever `DRX_NODE` says.
 
 ## Commands
 
