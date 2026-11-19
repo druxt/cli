@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  readFileSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -156,6 +157,18 @@ describe('check-attribution.sh, when a scan cannot run', () => {
     )
     expect(result.stdout).not.toContain('[PASS]')
     expect(result.status).toBe(2)
+  })
+})
+
+// git on macOS is built with a regex library that has no "\\b", and reads it as a plain "b".
+describe('check-attribution.sh, on any regex library', () => {
+  test('uses no GNU-only word boundary', () => {
+    const source = readFileSync(SCRIPT, 'utf8')
+    const code = source
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n')
+    expect(code).not.toContain('\\b')
   })
 })
 

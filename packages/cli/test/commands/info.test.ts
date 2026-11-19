@@ -139,6 +139,31 @@ describe('drx info inside a project', () => {
     })
   })
 
+  // The config is read again on every run: a loader that caches the file by
+  // its path would report the first run's parts.
+  test('reports a part path edited between two runs', async () => {
+    const root = project()
+    const first = await run(['info', '--json'], { cwd: root })
+    expect(JSON.parse(first.stdout).project.parts[0].path).toBe('nuxt')
+
+    writeTree(root, {
+      'drx.config.json': {
+        layout: 'monorepo',
+        line: '0.x',
+        starter: 'quickstart',
+        source: 'npm',
+        parts: [
+          { role: 'frontend', kind: 'nuxt', path: 'web' },
+          { role: 'backend', kind: 'drupal', path: 'drupal' },
+        ],
+      },
+      'web/package.json': { dependencies: { nuxt: '2.15.8' } },
+    })
+    const second = await run(['info', '--json'], { cwd: root })
+    expect(second.code).toBe(0)
+    expect(JSON.parse(second.stdout).project.parts[0].path).toBe('web')
+  })
+
   test('says when a part is missing, unrecognised or of an unknown kind', async () => {
     const root = tmp()
     writeTree(root, {
