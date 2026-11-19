@@ -14,11 +14,26 @@ export interface Launch {
   /** The path of the Node that is running. */
   current: string
   stderr: { write(text: string): unknown }
+  stdout: { write(text: string): unknown }
   /** Runs the command on this Node. Loaded only when this Node is new enough. */
   run: (argv: string[]) => Promise<number>
   stdio?: StdioOptions
   /** Directories of binaries that a system install puts Node in. */
   system?: string[]
+}
+
+/**
+ * Reports a failure of the launcher itself. No command ran, so with `--json`
+ * the one JSON document on stdout is this error.
+ */
+function fail(options: Launch, message: string): number {
+  if (options.argv.includes('--json')) {
+    options.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: 'node', message } }, null, 2)}\n`
+    )
+  }
+  options.stderr.write(`Error: ${message}\n`)
+  return 1
 }
 
 /**
@@ -43,14 +58,10 @@ export async function launch(options: Launch): Promise<number> {
         ...(options.system ? { system: options.system } : {}),
       })
   if (!newer) {
-    options.stderr.write(
-      [
-        problem,
-        'No newer Node was found on this machine. Install one, or set DRX_NODE to the path of its node binary.',
-        '',
-      ].join('\n')
+    return fail(
+      options,
+      `${problem}\nNo newer Node was found on this machine. Install one, or set DRX_NODE to the path of its node binary.`
     )
-    return 1
   }
 
   return new Promise<number>((resolve) => {
@@ -60,10 +71,12 @@ export async function launch(options: Launch): Promise<number> {
       env: { ...options.env, DRX_RELAUNCHED: options.node },
     })
     child.on('error', (error) => {
-      options.stderr.write(
-        `${problem}\n${newer} could not be started: ${error.message}\n`
+      resolve(
+        fail(
+          options,
+          `${problem}\n${newer} could not be started: ${error.message}`
+        )
       )
-      resolve(1)
     })
     child.on('close', (code) => resolve(code === null ? 1 : code))
   })
@@ -76,6 +89,7 @@ export interface RunningProcess {
   env: Record<string, string | undefined>
   execPath: string
   stderr: { write(text: string): unknown }
+  stdout: { write(text: string): unknown }
 }
 
 /**
@@ -96,6 +110,7 @@ export function launchProcess(
     home,
     current: running.execPath,
     stderr: running.stderr,
+    stdout: running.stdout,
     run: async (argv) => {
       const loaded = (await import(module)) as Record<
         string,
