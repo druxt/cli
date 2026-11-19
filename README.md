@@ -204,7 +204,7 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 | `install.runs`      | Optional. The steps the install runs itself, left out of "Next" after one  |
 | `install.notes`     | Optional. Lines printed under "Note" after an install                      |
 
-`index.json` is `{ "starters": ["quickstart"] }`.
+`index.json` is `{ "revision": 1, "starters": ["quickstart"] }`. The revision is a whole number that goes up whenever the entries gain something a version of `drx` depends on. A `drx` whose bundled copy has a higher revision than the default registry reads the bundled copy, so a build made ahead of what is published keeps working.
 
 `requires.commands` is a list of alternatives, and each alternative is a list of command names. The site can be set up when every command of one alternative is on `PATH`. `[["php", "composer"], ["ddev"]]` reads as `php` and `composer`, or `ddev`. A name is a bare command, and an entry with a path or arguments in one is rejected.
 

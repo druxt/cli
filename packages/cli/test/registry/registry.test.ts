@@ -39,6 +39,58 @@ afterEach(async () => {
   rmSync(bundled, { recursive: true, force: true })
 })
 
+describe('a default registry that is behind this build', () => {
+  const entries = { '/quickstart.json': entry }
+
+  test('gives way to the bundled copy when its revision is lower', async () => {
+    writeFileSync(
+      join(bundled, 'index.json'),
+      JSON.stringify({ revision: 2, starters: ['quickstart'] })
+    )
+    server = await serve({ ...entries, '/index.json': index })
+    const registry = await openRegistry({
+      defaultUrl: server.url,
+      bundledDir: bundled,
+    })
+    expect(registry.origin).toBe('bundled')
+    expect(registry.fallbackReason).toBe(
+      `${server.url} is older than this version of drx.`
+    )
+    expect((await registry.entry('quickstart')).url).toBe(
+      'https://example.com/bundled'
+    )
+  })
+
+  test('is read when its revision is the same or higher', async () => {
+    writeFileSync(
+      join(bundled, 'index.json'),
+      JSON.stringify({ revision: 2, starters: ['quickstart'] })
+    )
+    for (const revision of [2, 3]) {
+      server = await serve({
+        ...entries,
+        '/index.json': JSON.stringify({ revision, starters: ['quickstart'] }),
+      })
+      const registry = await openRegistry({
+        defaultUrl: server.url,
+        bundledDir: bundled,
+      })
+      expect(registry.origin).toBe('remote')
+      await server.close()
+    }
+    server = undefined
+  })
+
+  test('is read when the bundled copy cannot be', async () => {
+    server = await serve({ ...entries, '/index.json': index })
+    const registry = await openRegistry({
+      defaultUrl: server.url,
+      bundledDir: join(bundled, 'missing'),
+    })
+    expect(registry.origin).toBe('remote')
+  })
+})
+
 describe('a registry named by the user', () => {
   test('reads the index and an entry over HTTP', async () => {
     server = await serve({ '/index.json': index, '/quickstart.json': entry })
