@@ -39,7 +39,8 @@ The Druxt command-line tool: `@druxt/cli`, with the binary `drx`, and `create-dr
   release writes it from `.changeset/`, through `.changeset/changelog.cjs`.
 - **Only `.github/workflows/release.yml` publishes to npm,** and only once the
   setup in `RELEASING.md` is done. Its publish jobs check out nothing and hold
-  no token. Do not add a publish step anywhere else, or one that runs
+  no npm token: npm accepts the workflow's own identity. The `release` job holds the
+  run's own GitHub token, to create the tag and the Release. Do not add a publish step anywhere else, or one that runs
   repository code.
 
 ## Layout
