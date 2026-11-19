@@ -9,6 +9,15 @@ import {
   type CommandCheck,
 } from '../commands-on-path.js'
 import type { CliContext } from '../context.js'
+import { writeBackendUrl } from '../engines/backend-url.js'
+import {
+  assertBaseUrl,
+  chooseEngine,
+  missingCommandsWarning,
+  stepLines,
+  type EngineChoice,
+} from '../engines/choose.js'
+import { removeEngineFiles } from '../engines/files.js'
 import { DrxError } from '../errors.js'
 import {
   assertLayoutAvailable,
@@ -64,6 +73,31 @@ const args = {
     valueHint: 'name',
     description: `Where the Druxt packages come from (default: ${DEFAULT_SOURCE})`,
   },
+  engine: {
+    type: 'string',
+    valueHint: 'name',
+    description:
+      'How the backend runs: an engine of the starter, or none for a backend that exists already',
+  },
+  database: {
+    type: 'string',
+    valueHint: 'name',
+    description: 'The database, where the engine offers a choice',
+  },
+  'base-url': {
+    type: 'string',
+    valueHint: 'url',
+    description: 'With --engine none: the URL of the backend',
+  },
+  'keep-engines': {
+    type: 'boolean',
+    description: 'Keep the files of the engines that were not chosen',
+  },
+  setup: {
+    type: 'boolean',
+    description:
+      'Run the steps of the engine after creating the site (not available yet)',
+  },
   install: {
     type: 'boolean',
     description: 'Install the dependencies of the site after creating it',
@@ -90,6 +124,11 @@ interface InitOptions {
   layout?: Layout
   registry?: string
   source?: string
+  engine?: string
+  database?: string
+  baseUrl?: string
+  keepEngines: boolean
+  setup: boolean
   install?: boolean
   force: boolean
   yes: boolean
@@ -190,6 +229,7 @@ function nodeSatisfies(running: string, needed: string): boolean {
 
 function warnAboutStarter(
   entry: StarterEntry,
+  engine: EngineChoice | undefined,
   target: string,
   context: CliContext,
   output: Output
@@ -212,6 +252,19 @@ function warnAboutStarter(
         `The starter has no ${part.path}/ directory, which its registry entry names as the ${part.role} part.`
       )
     }
+  }
+
+  if (engine) {
+    // The chosen engine's commands are the ones that matter. An engine with
+    // none, such as a backend that exists already, has nothing to check.
+    if (engine.commands.length === 0) return null
+    const check = checkCommands([engine.commands], context.findCommand)
+    if (!check.satisfied) {
+      output.warn(
+        missingCommandsWarning(engine.name, engine.commands, check.missing)
+      )
+    }
+    return check
   }
 
   if (!requires.commands) return null
@@ -241,6 +294,14 @@ async function runInit(
     )
   }
 
+  if (options.setup) {
+    throw new DrxError(
+      'not-available',
+      '--setup is not available yet. init prints the steps for you to run.'
+    )
+  }
+  if (options.baseUrl) assertBaseUrl(options.baseUrl)
+
   // Everything that can fail without the network is checked before it is used.
   const userConfig = await loadUserConfig(context.env)
   const source = resolveSource(options.source ?? DEFAULT_SOURCE, userConfig)
@@ -266,6 +327,7 @@ async function runInit(
 
   const entry = await chooseStarter(registry, options, context, canAsk)
   const layout = await chooseLayout(entry, options, context, canAsk)
+  const engine = await chooseEngine(entry, options, context, canAsk)
 
   const defaultDir = entry.defaultDir ?? entry.name
   const dir =
@@ -277,6 +339,8 @@ async function runInit(
         })
       : defaultDir)
   const target = targetDirectory(context.cwd, dir, options.force)
+  // Looked at before the download, which fills the directory.
+  const held = existsSync(target) && readdirSync(target).length > 0
 
   const install =
     options.install ??
@@ -318,15 +382,61 @@ async function runInit(
     )
   }
 
+  let removed: string[] = []
+  if (engine && !options.keepEngines) {
+    // In a directory that held files, a path of another engine may be the
+    // user's own, and --force was a yes to writing, not to deleting.
+    const paths = await removeEngineFiles(
+      target,
+      engine.remove,
+      engine.keep,
+      held
+    )
+    if (held && paths.length > 0) {
+      output.warn(
+        `${target} was not empty, so the files of the engines not chosen were left in place: ${paths.join(', ')}. --force writes the files of the starter and deletes nothing.`
+      )
+    } else if (paths.length > 0) {
+      removed = paths
+      output.note(
+        `Removed the files of the engines not chosen: ${removed.join(', ')}.`
+      )
+    }
+  }
+  if (engine?.writeUrl) {
+    const where = entry.druxt.backendUrl
+    if (where) {
+      await writeBackendUrl(target, where, engine.writeUrl)
+      output.note(
+        `Wrote ${where.variable}=${engine.writeUrl} to ${where.file}.`
+      )
+    } else if (engine.baseUrl) {
+      output.warn(
+        `The ${entry.name} starter does not say where it reads its backend URL from. Point it at ${engine.baseUrl} yourself.`
+      )
+    }
+  }
+
   const config: ProjectConfig = {
     layout,
     line: entry.druxt.line,
     starter: entry.name,
     source: source.name,
-    parts: entry.druxt.parts,
+    // The choice is recorded on every backend part, for the commands that
+    // will run tools in it.
+    parts: entry.druxt.parts.map((part) =>
+      engine && part.role === 'backend'
+        ? {
+            ...part,
+            engine: engine.name,
+            ...(engine.database ? { database: engine.database } : {}),
+            ...(engine.baseUrl ? { baseUrl: engine.baseUrl } : {}),
+          }
+        : part
+    ),
   }
   await writeProjectConfig(target, config)
-  const commands = warnAboutStarter(entry, target, context, output)
+  const commands = warnAboutStarter(entry, engine, target, context, output)
 
   if (install) {
     output.note('Installing dependencies.')
@@ -351,10 +461,15 @@ async function runInit(
     // A name that starts with a hyphen is written as a path: a shell reads
     // "cd -" as the previous directory, and "cd -x" as an option.
     `cd ${shellQuote(shown.startsWith('-') ? `./${shown}` : shown)}`,
-    ...(entry.druxt.steps ?? []).filter((step) => !ran?.runs?.includes(step)),
+    ...stepLines(
+      (engine ? engine.steps : (entry.druxt.steps ?? [])).filter(
+        (step) => !(typeof step === 'string' && ran?.runs?.includes(step))
+      )
+    ),
   ]
-  const notes = ran?.notes ?? []
   const { requires } = entry.druxt
+  const needs = engine ? [engine.label] : requires.tools
+  const notes = [...(engine?.notes ?? []), ...(ran?.notes ?? [])]
 
   output.result(
     {
@@ -364,6 +479,10 @@ async function runInit(
       ...config,
       installed: install,
       requires,
+      engine: engine?.name ?? null,
+      database: engine?.database ?? null,
+      baseUrl: engine?.baseUrl ?? null,
+      removed,
       commands,
       next,
       notes,
@@ -373,7 +492,7 @@ async function runInit(
       '',
       'It needs:',
       `  Node ${requires.node}`,
-      ...requires.tools.map((tool) => `  ${tool}`),
+      ...needs.map((tool) => `  ${tool}`),
       '',
       'Next:',
       ...next.map((step) => `  ${step}`),
@@ -396,7 +515,15 @@ export function initCommand(context: CliContext) {
       const options: InitOptions = {
         force: parsed.force === true,
         yes: parsed.yes === true,
+        keepEngines: parsed['keep-engines'] === true,
+        setup: parsed.setup === true,
       }
+      const engine = valueOf('engine', parsed.engine)
+      const database = valueOf('database', parsed.database)
+      const baseUrl = valueOf('base-url', parsed['base-url'])
+      if (engine) options.engine = engine
+      if (database) options.database = database
+      if (baseUrl) options.baseUrl = baseUrl
       const dir = valueOf('dir', parsed.dir)
       const starter = valueOf('starter', parsed.starter)
       const registry = valueOf('registry', parsed.registry)

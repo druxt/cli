@@ -105,9 +105,13 @@ describe('drx init', () => {
       ...CONFIG,
       installed: false,
       requires: { node: '16.18.1', tools: ['DDEV'] },
+      engine: null,
+      database: null,
+      baseUrl: null,
+      removed: [],
       commands: null,
-      next: ['cd site', 'npm run setup', 'npm run dev'],
       notes: [],
+      next: ['cd site', 'npm run setup', 'npm run dev'],
     })
     expect(result.stderr).toContain('Reading starters from')
   })

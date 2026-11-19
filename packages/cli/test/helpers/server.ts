@@ -34,8 +34,10 @@ export async function serve(
     url: `http://127.0.0.1:${port}`,
     files,
     requests,
+    // Closing twice is allowed, so a test may replace its server early.
     close: () =>
       new Promise((resolve, reject) => {
+        if (!server.listening) return resolve()
         server.closeAllConnections()
         server.close((error) => (error ? reject(error) : resolve()))
       }),

@@ -21,6 +21,18 @@ export function isHttpUrl(value: unknown): value is string {
   }
 }
 
+/**
+ * True for a relative path that names something inside the directory it is
+ * resolved against: not absolute, not the directory itself, and with no
+ * segment that climbs out.
+ */
+export function isInsidePath(value: unknown): value is string {
+  if (!isNonEmptyString(value)) return false
+  if (/^[\\/]/.test(value) || /^[a-z]:/i.test(value)) return false
+  const segments = value.split(/[\\/]/).filter((segment) => segment !== '.')
+  return segments.some(Boolean) && !segments.includes('..')
+}
+
 /** npm's own limit on the length of a package name. */
 const NPM_NAME_LENGTH = 214
 const NPM_NAME = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/

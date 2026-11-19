@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import { DrxError } from '../../src/errors.js'
 import { validateEntry } from '../../src/registry/entry.js'
+import { enginesWith, validEngines } from '../helpers/engines.js'
 import { entryWith, validEntry } from '../helpers/entry.js'
 
 describe('validateEntry', () => {
@@ -162,5 +163,129 @@ describe('validateEntry', () => {
     expect(attempt).toThrow(
       `Starter entry "quickstart" is invalid: ${message}.`
     )
+  })
+})
+
+describe('validateEntry and engines', () => {
+  const E = 'druxt.engines'
+  const backendUrl = {
+    file: '.env',
+    template: '.env.example',
+    variable: 'BASE_URL',
+  }
+
+  test('accepts engines and where the backend URL goes', () => {
+    const entry = entryWith(E, validEngines())
+    ;(entry.druxt as Record<string, unknown>).backendUrl = backendUrl
+    expect(validateEntry(entry, 'quickstart')).toEqual(entry)
+  })
+
+  test.each([
+    ['php', `${E} must be a non-empty array`],
+    [[], `${E} must be a non-empty array`],
+    [['php'], `${E}[0] must be an object`],
+    [
+      enginesWith(1, 'name', undefined),
+      `${E}[1].name must be a lower-case name`,
+    ],
+    [
+      enginesWith(1, 'name', 'My Engine'),
+      `${E}[1].name must be a lower-case name`,
+    ],
+    [
+      enginesWith(1, 'name', 'none'),
+      `${E}[1].name cannot be none, which every starter has`,
+    ],
+    [enginesWith(1, 'name', 'php'), `${E}[1].name repeats the name php`],
+    [enginesWith(0, 'label', ''), `${E}[0].label must be a non-empty string`],
+    [
+      enginesWith(0, 'commands', undefined),
+      `${E}[0].commands must be an array of command names`,
+    ],
+    [
+      enginesWith(0, 'commands', ['php', 'bin/composer']),
+      `${E}[0].commands[1] must be a command name with no path or spaces`,
+    ],
+    [
+      enginesWith(0, 'databases', []),
+      `${E}[0].databases must be a non-empty array of names`,
+    ],
+    [
+      enginesWith(0, 'databases', ['sqlite', 7]),
+      `${E}[0].databases must be a non-empty array of names`,
+    ],
+    [enginesWith(0, 'steps', undefined), `${E}[0].steps must be an array`],
+    [
+      enginesWith(0, 'steps', [7]),
+      `${E}[0].steps[0] must be a command, or an object with run and dir`,
+    ],
+    [
+      enginesWith(0, 'steps', [{ run: 'x' }]),
+      `${E}[0].steps[0].dir must be a relative path inside the starter`,
+    ],
+    [
+      enginesWith(0, 'steps', [{ run: '', dir: 'drupal' }]),
+      `${E}[0].steps[0].run must be a non-empty string`,
+    ],
+    [
+      enginesWith(0, 'steps', [{ run: 'x', dir: '../up' }]),
+      `${E}[0].steps[0].dir must be a relative path inside the starter`,
+    ],
+    [
+      enginesWith(1, 'notes', 'a note'),
+      `${E}[1].notes must be an array of strings`,
+    ],
+    [
+      enginesWith(1, 'baseUrl', 'fixture.ddev.site'),
+      `${E}[1].baseUrl must be an http or https URL`,
+    ],
+    [
+      enginesWith(2, 'files', 'drupal/.lando.yml'),
+      `${E}[2].files must be an array of paths`,
+    ],
+    [
+      enginesWith(2, 'files', ['/etc/passwd']),
+      `${E}[2].files[0] must be a relative path inside the starter`,
+    ],
+    [
+      enginesWith(2, 'files', ['drupal/.lando.yml', 'drupal/../../outside']),
+      `${E}[2].files[1] must be a relative path inside the starter`,
+    ],
+    [
+      enginesWith(2, 'files', ['C:\\Windows']),
+      `${E}[2].files[0] must be a relative path inside the starter`,
+    ],
+    [
+      enginesWith(2, 'files', ['.']),
+      `${E}[2].files[0] must be a relative path inside the starter`,
+    ],
+  ])('names the bad engine field in %j', (engines, message) => {
+    expect(() => validateEntry(entryWith(E, engines), 'quickstart')).toThrow(
+      `Starter entry "quickstart" is invalid: ${message}.`
+    )
+  })
+
+  test.each([
+    ['.env', 'druxt.backendUrl must be an object'],
+    [
+      { variable: 'BASE_URL' },
+      'druxt.backendUrl.file must be a relative path inside the starter',
+    ],
+    [
+      { file: '../.env', variable: 'BASE_URL' },
+      'druxt.backendUrl.file must be a relative path inside the starter',
+    ],
+    [
+      { file: '.env', variable: 'BASE URL' },
+      'druxt.backendUrl.variable must be the name of a variable',
+    ],
+    [
+      { file: '.env', variable: 'BASE_URL', template: '/etc/env' },
+      'druxt.backendUrl.template must be a relative path inside the starter',
+    ],
+  ])('names the bad backendUrl field in %j', (value, message) => {
+    expect(() =>
+      validateEntry(entryWith('druxt.backendUrl', value), 'quickstart')
+    ).toThrow(`Starter entry "quickstart" is invalid: ${message}.`)
   })
 })

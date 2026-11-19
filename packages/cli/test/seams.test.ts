@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest'
 import { bundledRegistryDir, packageRoot } from '../src/package-root.js'
 
 const KIND_WORD = /nuxt|drupal/i
+const ENGINE_WORD = /\b(ddev|lando|php)\b/i
 
 /** Every file under a directory, as paths relative to it. */
 function filesUnder(dir: string): string[] {
@@ -40,5 +41,17 @@ describe('the names of kinds', () => {
     )
     expect(keys.length).toBeGreaterThan(0)
     expect(keys.filter((key) => KIND_WORD.test(key))).toEqual([])
+  })
+})
+
+// An engine is a name in a registry entry and an adapter in engines/. A
+// command asks the adapter, so adding an engine changes no command.
+describe('the names of engines', () => {
+  test('appear in the sources only inside engines/', () => {
+    const src = join(packageRoot(), 'src')
+    const offenders = filesUnder(src)
+      .filter((file) => !file.startsWith('engines'))
+      .filter((file) => ENGINE_WORD.test(readFileSync(join(src, file), 'utf8')))
+    expect(offenders).toEqual([])
   })
 })

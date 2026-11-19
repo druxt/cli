@@ -12,17 +12,70 @@
     ],
     "requires": {
       "node": "16.18.1",
-      "tools": ["PHP 8.3 or newer with Composer, or DDEV"],
-      "commands": [["php", "composer"], ["ddev"]]
+      "tools": ["PHP 8.3 or newer with Composer, or DDEV, or Lando"]
     },
-    "maintained": "2026-11-15",
+    "maintained": "2026-11-16",
     "default": true,
     "steps": ["npm run setup", "npm run dev"],
+    "backendUrl": {
+      "file": ".env",
+      "template": ".env.example",
+      "variable": "BASE_URL"
+    },
+    "engines": [
+      {
+        "name": "php",
+        "label": "PHP 8.3 or newer with the pdo_sqlite extension, and Composer",
+        "commands": ["php", "composer"],
+        "databases": ["sqlite"],
+        "steps": ["npm run setup", "npm run dev"],
+        "notes": [
+          "This engine does not run on Windows itself. Use WSL2 there, or another engine."
+        ],
+        "files": []
+      },
+      {
+        "name": "ddev",
+        "label": "DDEV",
+        "commands": ["ddev"],
+        "databases": ["mariadb"],
+        "baseUrl": "http://quickstart-druxtsite.ddev.site",
+        "steps": [
+          "npm run setup",
+          { "run": "ddev start", "dir": "drupal" },
+          { "run": "ddev drupal-install", "dir": "drupal" },
+          { "run": "ddev druxt-add-consumer", "dir": "drupal" },
+          "npm run dev"
+        ],
+        "notes": [
+          "ddev druxt-add-consumer prints OAUTH_CLIENT_ID. Copy it into .env before npm run dev."
+        ],
+        "files": ["drupal/.ddev"]
+      },
+      {
+        "name": "lando",
+        "label": "Lando",
+        "commands": ["lando"],
+        "databases": ["mariadb"],
+        "baseUrl": "https://druxt-quickstart.lndo.site",
+        "steps": [
+          "npm run setup",
+          { "run": "lando start", "dir": "drupal" },
+          { "run": "lando drupal-install", "dir": "drupal" },
+          { "run": "lando druxt-add-consumer", "dir": "drupal" },
+          "npm run dev"
+        ],
+        "notes": [
+          "lando druxt-add-consumer prints OAUTH_CLIENT_ID. Copy it into .env before npm run dev."
+        ],
+        "files": ["drupal/.lando.yml", "drupal/.ddev/commands"]
+      }
+    ],
     "install": {
       "runs": ["npm run setup"],
       "notes": [
         "npm install ran the setup. If it said it could not, run npm run setup once what it named is in place.",
-        "npm run dev starts the backend again when it is not running."
+        "With the php engine, npm run dev starts the backend again when it is not running. A DDEV, Lando or existing backend is started where it runs."
       ]
     }
   }
