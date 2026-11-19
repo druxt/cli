@@ -17,6 +17,8 @@ export interface Launch {
   /** Runs the command on this Node. Loaded only when this Node is new enough. */
   run: (argv: string[]) => Promise<number>
   stdio?: StdioOptions
+  /** Directories of binaries that a system install puts Node in. */
+  system?: string[]
 }
 
 /**
@@ -38,6 +40,7 @@ export async function launch(options: Launch): Promise<number> {
         script: options.script,
         home: options.home,
         current: options.current,
+        ...(options.system ? { system: options.system } : {}),
       })
   if (!newer) {
     options.stderr.write(
