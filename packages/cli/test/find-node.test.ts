@@ -33,6 +33,7 @@ describe.skipIf(process.platform === 'win32')(
           script: '/x/drx',
           home: tmp(),
           current: '/old/node',
+          system: [],
         })
       ).toBe(named)
     })
@@ -46,6 +47,7 @@ describe.skipIf(process.platform === 'win32')(
           script: join(prefix, 'bin', 'drx'),
           home: tmp(),
           current: '/old/node',
+          system: [],
         })
       ).toBe(beside)
     })
@@ -61,6 +63,7 @@ describe.skipIf(process.platform === 'win32')(
           script: '/x/drx',
           home: tmp(),
           current,
+          system: [],
         })
       ).toBe(found)
     })
@@ -79,6 +82,7 @@ describe.skipIf(process.platform === 'win32')(
           script: '/x/drx',
           home,
           current: '/old/node',
+          system: [],
         })
       ).toBe(newest)
     })
@@ -95,6 +99,7 @@ describe.skipIf(process.platform === 'win32')(
           script: '/x/drx',
           home: tmp(),
           current: '/old/node',
+          system: [],
         })
       ).toBeUndefined()
     })
@@ -120,6 +125,7 @@ describe.skipIf(process.platform === 'win32')(
         env: { PATH: newer },
         home: tmp(),
         current: '/old/node',
+        system: [],
         stderr,
         run: async () => 0,
         stdio: 'ignore',
@@ -137,6 +143,7 @@ describe.skipIf(process.platform === 'win32')(
         env: { PATH: '' },
         home: tmp(),
         current: '/old/node',
+        system: [],
         stderr,
         run: async () => 0,
       })
@@ -156,6 +163,7 @@ describe.skipIf(process.platform === 'win32')(
         env: { PATH: newer, DRX_RELAUNCHED: '1' },
         home: tmp(),
         current: '/old/node',
+        system: [],
         stderr: again,
         run: async () => 0,
       })
