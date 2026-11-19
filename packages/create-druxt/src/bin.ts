@@ -1,4 +1,8 @@
 #!/usr/bin/env node
-import { createDruxt } from './index.js'
+import { launch } from './launch.js'
 
-process.exitCode = await createDruxt(process.argv.slice(2))
+process.exitCode = await launch(
+  process.versions.node,
+  process.argv.slice(2),
+  process.stderr
+)
