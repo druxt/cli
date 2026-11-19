@@ -88,6 +88,12 @@ function candidates(search: NodeSearch): string[] {
       join(env.NVM_DIR || join(home, '.nvm'), 'versions', 'node'),
       'bin'
     ),
+    ...(env.FNM_DIR
+      ? installs(
+          join(env.FNM_DIR, 'node-versions'),
+          join('installation', 'bin')
+        )
+      : []),
     ...installs(
       join(data, 'fnm', 'node-versions'),
       join('installation', 'bin')
