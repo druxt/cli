@@ -224,9 +224,22 @@ jobs:
       - name: Publish under the dev tag
         shell: bash
         run: |
+          # Prints what npm has for a field of a package or version, and nothing
+          # when npm has none. Any other failure stops the job here: a registry
+          # error must never read as "not published".
+          npm_field() {
+            local out
+            if out="$(npm view "$1" "$2" 2> npm-view.err)"; then
+              printf '%s' "$out"
+            elif ! grep -q 'E404' npm-view.err; then
+              cat npm-view.err >&2
+              return 1
+            fi
+          }
           for file in dev-package/*/*.tgz; do
             release="$(tar -xzOf "$file" package/package.json | node -p "const p = JSON.parse(require('fs').readFileSync(0, 'utf8')); p.name + '@' + p.version")"
-            if [ -n "$(npm view "$release" version 2>/dev/null)" ]; then
+            have="$(npm_field "$release" version)"
+            if [ -n "$have" ]; then
               echo "- $release (already on npm)" >> "$GITHUB_STEP_SUMMARY"
               continue
             fi
@@ -433,6 +446,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # Prints what npm has for a field of a package or version, and nothing
+          # when npm has none. Any other failure stops the job here: a registry
+          # error must never read as "not published".
+          npm_field() {
+            local out
+            if out="$(npm view "$1" "$2" 2> npm-view.err)"; then
+              printf '%s' "$out"
+            elif ! grep -q 'E404' npm-view.err; then
+              cat npm-view.err >&2
+              return 1
+            fi
+          }
           for out in release-package/*; do
             tag="$(cat "$out/tag")"
             dist_tag="$(cat "$out/dist-tag")"
@@ -441,7 +466,7 @@ jobs:
             # published a higher version since, and an explicit `latest`
             # would move the tag back to this one. Ask npm again.
             if [ "$dist_tag" = latest ]; then
-              latest="$(npm view "${tag%@*}" dist-tags.latest 2>/dev/null || true)"
+              latest="$(npm_field "${tag%@*}" dist-tags.latest)"
               dist_tag="$(node -e '
                 const core = (version) => version.split("-")[0].split(".").map(Number)
                 const [version, latest] = process.argv.slice(1).map((v) => v && core(v))
@@ -449,7 +474,8 @@ jobs:
                 console.log(below ? "latest-" + version[0] : "latest")
               ' "${tag##*@}" "$latest")"
             fi
-            if [ -n "$(npm view "$tag" version 2>/dev/null)" ]; then
+            have="$(npm_field "$tag" version)"
+            if [ -n "$have" ]; then
               state="already on npm"
             else
               npm publish "./$out"/*.tgz --access public --tag "$dist_tag"
