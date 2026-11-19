@@ -7,6 +7,12 @@ import {
 } from './presentation.js'
 
 /**
+ * The streams that already have the wordmark or the small header. The menu
+ * draws one and then runs a command, which makes an output of its own.
+ */
+const HEADED = new WeakSet<object>()
+
+/**
  * Where a command writes. The result goes to stdout: text, or JSON with
  * `--json`. Everything said along the way goes to stderr, so stdout can be
  * piped or parsed whichever form it takes.
@@ -69,8 +75,9 @@ export function createOutput(context: CliContext, json: boolean): Output {
     warn: (message) => write(marked('warning', `Warning: ${message}`)),
     line: (message = '') => write(message),
     header() {
-      if (!decorated || headed) return
+      if (!decorated || headed || HEADED.has(stderr)) return
       headed = true
+      HEADED.add(stderr)
       write(marked('working', err.bold(`druxt ${cliVersion()}`)))
     },
     banner({ flag, configured }) {
@@ -84,6 +91,7 @@ export function createOutput(context: CliContext, json: boolean): Output {
       })
       if (!allowed) return false
       headed = true
+      HEADED.add(stderr)
       write(`\n${err.wordmark()}\n`)
       return true
     },

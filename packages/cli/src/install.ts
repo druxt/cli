@@ -23,9 +23,15 @@ export async function packageManagerOf(
   return MANAGERS.find((manager) => manager === declared) ?? 'npm'
 }
 
+/** How much of a failed install's output is repeated in the error. */
+const OUTPUT_LINES = 40
+
 /**
- * Runs the install of the directory's package manager. Its output goes to
- * stderr, so the stdout of the CLI stays the result of the command.
+ * Runs the install of the directory's package manager.
+ *
+ * What it prints is kept, not shown: a starter's own install messages would
+ * sit in the middle of this command's. When the install fails, the end of
+ * its output is in the error.
  */
 export async function installDependencies(
   dir: string,
@@ -39,16 +45,28 @@ export async function installDependencies(
     const child = spawn(manager, ['install'], {
       cwd: dir,
       env,
-      stdio: ['ignore', process.stderr, process.stderr],
+      stdio: ['ignore', 'pipe', 'pipe'],
       shell: process.platform === 'win32',
     })
+    let printed = ''
+    for (const stream of [child.stdout, child.stderr]) {
+      stream?.setEncoding('utf8')
+      stream?.on('data', (chunk: string) => (printed += chunk))
+    }
     child.on('error', (error) =>
       reject(new Error(`${manager} install could not start: ${error.message}`))
     )
     child.on('close', (code) =>
       code === 0
         ? resolve()
-        : reject(new Error(`${manager} install exited with code ${code}`))
+        : reject(
+            new Error(
+              [
+                `${manager} install exited with code ${code}`,
+                ...printed.trimEnd().split('\n').slice(-OUTPUT_LINES),
+              ].join('\n')
+            )
+          )
     )
   })
 }

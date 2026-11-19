@@ -8,8 +8,16 @@
     "description": "Drupal 11, Nuxt 2 and Druxt 1 in one repository",
     "layout": "monorepo",
     "parts": [
-      { "role": "frontend", "kind": "nuxt", "path": "nuxt" },
-      { "role": "backend", "kind": "drupal", "path": "drupal" }
+      {
+        "role": "frontend",
+        "kind": "nuxt",
+        "path": "nuxt"
+      },
+      {
+        "role": "backend",
+        "kind": "drupal",
+        "path": "drupal"
+      }
     ],
     "requires": {
       "node": "16.18.1",
@@ -26,7 +34,8 @@
     "engines": [
       {
         "name": "php",
-        "label": "PHP 8.3 or newer with the pdo_sqlite extension, and Composer",
+        "label": "Local PHP with SQLite",
+        "needs": "PHP 8.3 or newer with the pdo_sqlite extension, and Composer",
         "commands": ["php", "composer"],
         "databases": ["sqlite"],
         "steps": ["npm run setup", "npm run dev"],
@@ -43,9 +52,18 @@
         "baseUrl": "http://quickstart-druxtsite.ddev.site",
         "steps": [
           "npm run setup",
-          { "run": "ddev start", "dir": "drupal" },
-          { "run": "ddev drupal-install", "dir": "drupal" },
-          { "run": "ddev druxt-add-consumer", "dir": "drupal" },
+          {
+            "run": "ddev start",
+            "dir": "drupal"
+          },
+          {
+            "run": "ddev drupal-install",
+            "dir": "drupal"
+          },
+          {
+            "run": "ddev druxt-add-consumer",
+            "dir": "drupal"
+          },
           "npm run dev"
         ],
         "notes": [
@@ -61,9 +79,18 @@
         "baseUrl": "https://druxt-quickstart.lndo.site",
         "steps": [
           "npm run setup",
-          { "run": "lando start", "dir": "drupal" },
-          { "run": "lando drupal-install", "dir": "drupal" },
-          { "run": "lando druxt-add-consumer", "dir": "drupal" },
+          {
+            "run": "lando start",
+            "dir": "drupal"
+          },
+          {
+            "run": "lando drupal-install",
+            "dir": "drupal"
+          },
+          {
+            "run": "lando druxt-add-consumer",
+            "dir": "drupal"
+          },
           "npm run dev"
         ],
         "notes": [
@@ -75,9 +102,12 @@
     "install": {
       "runs": ["npm run setup"],
       "notes": [
-        "npm install ran the setup. If it said it could not, run npm run setup once what it named is in place.",
         "With the php engine, npm run dev starts the backend again when it is not running. A DDEV, Lando or existing backend is started where it runs."
-      ]
+      ],
+      "done": {
+        "file": ".env",
+        "contains": ["BASE_URL=", "OAUTH_CLIENT_ID="]
+      }
     }
   }
 }

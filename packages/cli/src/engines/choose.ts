@@ -20,8 +20,10 @@ export interface EngineOptions {
 /** The engine a site is created with, and what follows from the choice. */
 export interface EngineChoice {
   name: string
-  /** What the site needs for this engine, as a phrase. */
+  /** The engine's name as the user reads it. */
   label: string
+  /** What the site needs for this engine, as a phrase. */
+  needs: string
   /** The commands the engine needs on PATH. */
   commands: string[]
   database?: string
@@ -159,6 +161,7 @@ async function existingBackend(
   return {
     name: EXISTING_BACKEND,
     label: `A backend that exists already, at ${baseUrl}`,
+    needs: `A backend that exists already, at ${baseUrl}`,
     commands: [],
     baseUrl,
     writeUrl: baseUrl,
@@ -215,6 +218,7 @@ export async function chooseEngine(
   return {
     name,
     label: engine.label,
+    needs: engine.needs ?? engine.label,
     commands: engine.commands,
     ...(database ? { database } : {}),
     ...(engine.baseUrl ? { writeUrl: engine.baseUrl } : {}),
