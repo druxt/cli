@@ -117,6 +117,11 @@
         "file": ".env",
         "contains": ["BASE_URL=", "OAUTH_CLIENT_ID="]
       }
+    },
+    "existingBackend": {
+      "notes": [
+        "Set OAUTH_CLIENT_ID in .env to the client ID of an OAuth consumer on that Drupal before npm run dev. The site does not start without one."
+      ]
     }
   }
 }
