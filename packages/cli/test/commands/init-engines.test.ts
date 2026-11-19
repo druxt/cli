@@ -143,6 +143,20 @@ describe('drx init --engine', () => {
     expect(has('.env')).toBe(false)
   })
 
+  test('names an engine by its label and lists what it needs apart from it', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      const engines = druxt.engines as Record<string, unknown>[]
+      engines[0]!.label = 'Local PHP with SQLite'
+      engines[0]!.needs = 'PHP 8.3 or newer, and Composer'
+    })
+    const result = await init(['--yes', '--engine', 'php'])
+    expect(result.stdout).toContain(
+      'It needs:\n  Node 16.18.1\n  PHP 8.3 or newer, and Composer\n'
+    )
+    expect(result.stdout).not.toContain('Local PHP with SQLite')
+  })
+
   test('prints what the engine needs, its steps and its notes', async () => {
     const result = await init(['--yes', '--engine', 'ddev'])
     expect(result.stdout).toBe(

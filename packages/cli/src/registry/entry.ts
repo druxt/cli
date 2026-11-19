@@ -33,8 +33,10 @@ export type EngineStep = string | { run: string; dir: string }
  */
 export interface StarterEngine {
   name: string
-  /** What the user reads in a prompt and under "It needs". */
+  /** The engine's name as the user reads it in a prompt. */
   label: string
+  /** What the engine needs on the machine, as a phrase. The label when absent. */
+  needs?: string
   /** The commands the engine needs on PATH. */
   commands: string[]
   /** The databases it can be set up with, the default first. */
@@ -94,6 +96,12 @@ export interface StarterInstall {
   runs?: string[]
   /** What to know once it has run, such as how to start the backend again. */
   notes?: string[]
+  /**
+   * How to tell that the install did run those steps: a file in the site that
+   * exists afterwards and holds each of these strings. Without it, the install
+   * is taken at its word.
+   */
+  done?: { file: string; contains?: string[] }
 }
 
 /** A giget registry entry with the `druxt` object `init` needs. */
@@ -174,6 +182,9 @@ function enginesProblem(value: unknown): string | undefined {
 
     if (!isNonEmptyString(engine.label)) {
       return `${at}.label must be a non-empty string`
+    }
+    if (engine.needs !== undefined && !isNonEmptyString(engine.needs)) {
+      return `${at}.needs must be a non-empty string`
     }
     if (!Array.isArray(engine.commands)) {
       return `${at}.commands must be an array of command names`
@@ -291,6 +302,16 @@ function entryProblem(entry: unknown): string | undefined {
     for (const key of ['runs', 'notes']) {
       if (install[key] !== undefined && !isStringArray(install[key])) {
         return `druxt.install.${key} must be an array of strings`
+      }
+    }
+    const done = install.done
+    if (done !== undefined) {
+      if (!isRecord(done)) return 'druxt.install.done must be an object'
+      if (!isNonEmptyString(done.file) || !isInsidePath(done.file)) {
+        return 'druxt.install.done.file must be a path inside the site'
+      }
+      if (done.contains !== undefined && !isStringArray(done.contains)) {
+        return 'druxt.install.done.contains must be an array of strings'
       }
     }
   }

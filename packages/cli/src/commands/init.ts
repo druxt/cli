@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { defineCommand, type ArgsDef } from 'citty'
 import { assertKnownOptions } from '../args.js'
 import {
@@ -28,7 +28,7 @@ import {
 } from '../layouts.js'
 import { columns, createOutput, type Output } from '../output.js'
 import { writeProjectConfig, type ProjectConfig } from '../project.js'
-import type { StarterEntry } from '../registry/entry.js'
+import type { StarterEntry, StarterInstall } from '../registry/entry.js'
 import { repeatCommand, shellQuote } from '../repeat.js'
 import {
   defaultStarter,
@@ -317,6 +317,29 @@ interface Plan {
   install: boolean
 }
 
+/** The nearest directory above a path that is a git repository, if any. */
+function enclosingRepository(target: string): string | undefined {
+  for (let dir = dirname(target); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, '.git'))) return dir
+    if (dirname(dir) === dir) return undefined
+  }
+}
+
+/**
+ * Whether the install ran the steps its entry says it runs. An entry with no
+ * `done` check is taken at its word.
+ */
+function installFinished(target: string, install: StarterInstall): boolean {
+  if (!install.done) return true
+  let text: string
+  try {
+    text = readFileSync(join(target, install.done.file), 'utf8')
+  } catch {
+    return false
+  }
+  return (install.done.contains ?? []).every((piece) => text.includes(piece))
+}
+
 /** What a guided run is about to do, for the user to confirm. */
 function summary(plan: Plan, options: InitOptions, output: Output): string[] {
   const { entry, engine } = plan
@@ -511,8 +534,10 @@ async function runInit(
     ...(context.env.GIGET_AUTH ? { auth: context.env.GIGET_AUTH } : {}),
   })
   if (registry.origin === 'bundled') {
-    output.note(`${registry.fallbackReason}`)
-    output.note('Reading starters from the copy bundled with this version.')
+    // One line: the fallback is routine while a registry cannot be read.
+    output.note(
+      `Reading starters from the copy bundled with this version. ${registry.fallbackReason}`
+    )
   } else if (output.decorated) {
     output.done(`Read the starters from ${registry.location}.`)
   } else {
@@ -539,6 +564,13 @@ async function runInit(
     throw error
   }
   const { entry, layout, engine, target, held, install } = settled
+
+  const repository = enclosingRepository(target)
+  if (repository) {
+    output.warn(
+      `${target} is inside the git repository at ${repository}. The site will be part of that repository's tree, and may pick up its tool versions.`
+    )
+  }
 
   output.note(`Fetching the ${entry.name} starter from ${entry.tar}.`)
   try {
@@ -627,7 +659,7 @@ async function runInit(
   const commands = warnAboutStarter(entry, engine, target, context, output)
 
   if (install) {
-    output.note('Installing dependencies.')
+    output.note('Installing dependencies. This can take a few minutes.')
     try {
       await context.install(target)
     } catch (error) {
@@ -644,7 +676,9 @@ async function runInit(
   const inside = fromCwd !== '' && !fromCwd.startsWith('..')
   // A step the install ran is not left to run: running a setup twice can
   // undo the first.
-  const ran = install ? entry.druxt.install : undefined
+  const declared = install ? entry.druxt.install : undefined
+  const finished = declared ? installFinished(target, declared) : false
+  const ran = finished ? declared : undefined
   const shown = inside && !isAbsolute(fromCwd) ? fromCwd : target
   const next = [
     // A name that starts with a hyphen is written as a path: a shell reads
@@ -657,8 +691,16 @@ async function runInit(
     ),
   ]
   const { requires } = entry.druxt
-  const needs = engine ? [engine.label] : requires.tools
-  const notes = [...(engine?.notes ?? []), ...(ran?.notes ?? [])]
+  const needs = engine ? [engine.needs] : requires.tools
+  const notes = [
+    ...(engine?.notes ?? []),
+    ...(ran?.notes ?? []),
+    ...(declared && !finished
+      ? [
+          'The install did not finish the setup, so it is still listed. It needs what the lines above name.',
+        ]
+      : []),
+  ]
 
   output.result(
     {

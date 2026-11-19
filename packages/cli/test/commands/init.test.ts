@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { CliContext, Prompter } from '../../src/context.js'
@@ -426,9 +426,14 @@ describe('drx init --registry', () => {
     })
     expect(result.code).toBe(0)
     expect(result.stderr).toContain(`Could not read ${unreachable}/index.json`)
-    expect(result.stderr).toContain(
-      'Reading starters from the copy bundled with this version.'
-    )
+    // One line: the fallback is routine while a registry cannot be read.
+    expect(
+      result.stderr
+        .split('\n')
+        .filter((line) => line.includes('bundled with this version'))
+    ).toEqual([
+      expect.stringContaining(`Could not read ${unreachable}/index.json`),
+    ])
     expect(JSON.parse(result.stdout).registry).toEqual({
       origin: 'bundled',
       location: bundled,
@@ -438,6 +443,46 @@ describe('drx init --registry', () => {
 })
 
 describe('drx init --install', () => {
+  // A starter's install may run its setup only when the tools are there. The entry says how to tell.
+  test('keeps a step in Next when the install did not finish it', async () => {
+    await registry.close()
+    registry = await fixtureRegistry(STARTER_FILES, (entry) => {
+      ;(entry.druxt as Record<string, unknown>).install = {
+        runs: ['npm run setup'],
+        notes: ['npm run dev starts the backend again.'],
+        done: { file: '.env', contains: ['BASE_URL='] },
+      }
+    })
+    const skipped = await init(['one', '--yes', '--install', '--json'], {
+      install: vi.fn(async () => {}),
+    })
+    const first = JSON.parse(skipped.stdout)
+    expect(first.next).toEqual(['cd one', 'npm run setup', 'npm run dev'])
+    expect(first.notes).toEqual([
+      'The install did not finish the setup, so it is still listed. It needs what the lines above name.',
+    ])
+
+    const finished = await init(['two', '--yes', '--install', '--json'], {
+      install: vi.fn(async (dir: string) => {
+        writeFileSync(join(dir, '.env'), 'BASE_URL=http://127.0.0.1:8888\n')
+      }),
+    })
+    const second = JSON.parse(finished.stdout)
+    expect(second.next).toEqual(['cd two', 'npm run dev'])
+    expect(second.notes).toEqual(['npm run dev starts the backend again.'])
+  })
+
+  test('warns when the site would sit inside another git repository', async () => {
+    mkdirSync(join(cwd, '.git'))
+    const result = await init(['site', '--yes', '--json'])
+    expect(result.code).toBe(0)
+    expect(result.stderr).toContain(
+      `${join(cwd, 'site')} is inside the git repository at ${cwd}.`
+    )
+    const clean = await init(['../elsewhere-' + Date.now(), '--yes', '--json'])
+    expect(clean.stderr).not.toContain('is inside the git repository')
+  })
+
   test('installs after the site is written', async () => {
     const install = vi.fn(async (dir: string) => {
       expect(existsSync(join(dir, 'drx.config.json'))).toBe(true)

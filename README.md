@@ -87,7 +87,11 @@ npx @druxt/cli init my-site --engine ddev
 npx @druxt/cli init my-site --engine none --base-url https://cms.example.com
 ```
 
-`--install` runs the install of the package manager the starter declares. For the `quickstart` starter that is `npm install`, which also sets up the Drupal backend when PHP and Composer are present. The steps printed under "Next" then leave out what the install ran, so nothing is set up twice.
+`--install` runs the install of the package manager the starter declares. For the `quickstart` starter that is `npm install`, which also sets up the Drupal backend when PHP and Composer are present. The steps printed under "Next" then leave out what the install ran, so nothing is set up twice. A starter's entry can name a file that proves the install ran them, in `druxt.install.done`. The file must exist afterwards and hold each string the entry lists, or the steps stay listed.
+
+The install's own output is not shown. When the install fails, the end of that output is in the error.
+
+`init` warns when the directory is inside a git repository, as the site would become part of that repository's tree.
 
 ### `drx info`
 
@@ -346,7 +350,8 @@ An entry in `engines` has:
 | Key         | What it holds                                                                                                      |
 | ----------- | ------------------------------------------------------------------------------------------------------------------ |
 | `name`      | The name `--engine` takes. Lower case. `none` is taken                                                             |
-| `label`     | What the prompt shows, and what `init` prints under "It needs"                                                     |
+| `label`     | The engine's name as the prompt shows it                                                                           |
+| `needs`     | Optional. What the engine needs on the machine, printed under "It needs". The label when absent                    |
 | `commands`  | The commands the engine needs on `PATH`, as bare names                                                             |
 | `databases` | Optional. The databases it can be set up with, the default first                                                   |
 | `steps`     | What to run in the new site, in order. A step is a command, or `{ "run", "dir" }` for a command run in a directory |

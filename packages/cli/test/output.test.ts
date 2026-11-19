@@ -96,6 +96,14 @@ describe('the banner', () => {
     expect(read().stderr).not.toContain('druxt ')
   })
 
+  // The menu draws the wordmark, then runs a command, which makes an Output of its own.
+  test('keeps the small header off a stream that already has the wordmark', () => {
+    const { made, read } = context({ tty: true, env: { NO_COLOR: '1' } })
+    expect(createOutput(made, false).banner({})).toBe(true)
+    createOutput(made, false).header()
+    expect(read().stderr).not.toContain(`druxt ${cliVersion()}`)
+  })
+
   test('is not drawn when the flag or the configuration says no', () => {
     const { made, read } = context({ tty: true })
     const output = createOutput(made, false)

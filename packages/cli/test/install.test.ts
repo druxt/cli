@@ -49,6 +49,22 @@ describe.skipIf(process.platform === 'win32')('installDependencies', () => {
     expect(readFileSync(join(dir, 'called-with.txt'), 'utf8')).toBe('install\n')
   })
 
+  test('says what the manager printed when the install fails', async () => {
+    const dir = tmp()
+    writeTree(dir, { 'package.json': {} })
+    const bin = tmp('drx-bin-')
+    writeTree(bin, { npm: '#!/bin/sh\necho "peer conflict: boom"\nexit 1\n' })
+    chmodSync(join(bin, 'npm'), 0o755)
+    await expect(
+      installDependencies(dir, {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+      })
+    ).rejects.toThrow(
+      /npm install exited with code 1[\s\S]*peer conflict: boom/
+    )
+  })
+
   test('fails when the install exits non-zero', async () => {
     const dir = tmp()
     writeTree(dir, { 'package.json': {} })
