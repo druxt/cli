@@ -192,6 +192,16 @@ describe('drx init --engine', () => {
     )
   })
 
+  test('makes a project name in one pass, whatever the directory is called', async () => {
+    const { siteProjectName } =
+      await import('../../src/engines/project-name.js')
+    expect(siteProjectName('/tmp/--My  Shop__2--')).toBe('my-shop-2')
+    expect(siteProjectName('/tmp/___')).toBe('druxt-site')
+    const started = performance.now()
+    expect(siteProjectName(`/tmp/${'-'.repeat(200_000)}x`)).toBe('x')
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
   test('refuses a project name that is not a plain lower-case name', async () => {
     await serve((druxt) => {
       withEngines(druxt)
