@@ -12,7 +12,12 @@ export interface NodeSearch {
   home: string
   /** The path of the Node that is running, which is not worth trying again. */
   current: string
+  /** Directories of binaries that a system install puts Node in. */
+  system?: string[]
 }
+
+/** Where a system install, or Homebrew, puts Node. */
+const SYSTEM = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
 
 const NAME = process.platform === 'win32' ? 'node.exe' : 'node'
 
@@ -93,9 +98,7 @@ function candidates(search: NodeSearch): string[] {
     ),
     ...installs(join(home, '.volta', 'tools', 'image', 'node'), 'bin'),
     ...installs(join(home, '.asdf', 'installs', 'nodejs'), 'bin'),
-    join('/opt/homebrew/bin', NAME),
-    join('/usr/local/bin', NAME),
-    join('/usr/bin', NAME)
+    ...(search.system ?? SYSTEM).map((dir) => join(dir, NAME))
   )
   if (env.ProgramFiles) list.push(join(env.ProgramFiles, 'nodejs', NAME))
   return list
