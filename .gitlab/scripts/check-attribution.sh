@@ -46,8 +46,12 @@ tools='claude|anthropic|copilot|chatgpt|openai|gemini|codex|cursor|aider|devin|w
 
 # Each alternative in pieces: the trailer keys, the footer, the session link
 # and the noreply address are the shapes seen in practice.
-trailer='(co-authored|assisted)'"-by:.*\\b(${tools})\\b"
-footer="generated (with|by).*\\b(${tools}|ai)\\b"
+#
+# The word edges are spelled out. "\b" is a GNU extension: the regex library
+# git is built with on macOS reads it as a plain "b", and matches nothing.
+edge='[^[:alnum:]_]'
+trailer='(co-authored|assisted)'"-by:(.*${edge})?(${tools})(${edge}|\$)"
+footer="generated (with|by)${edge}(.*${edge})?(${tools}|ai)(${edge}|\$)"
 session='claude-'"session:|claude\\.ai/code/session"
 address='noreply'"@anthropic\\.com"
 pattern="(${trailer})|(${footer})|(${session})|(${address})"
