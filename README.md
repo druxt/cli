@@ -1,3 +1,10 @@
+<!-- vale off -->
+<!-- The alt text describes what the banner shows: the @druxt/cli mark, name and description. The name-colon-description form trips ColonUsage. -->
+<a href="https://druxtjs.org">
+  <img src="https://raw.githubusercontent.com/druxt/cli/0.x/.github/banner.svg" alt="@druxt/cli: Command-line tool for Druxt">
+</a>
+<!-- vale on -->
+
 # Druxt CLI
 
 > The command-line tool for [Druxt](https://druxtjs.org), the fully decoupled Drupal and Nuxt framework.
