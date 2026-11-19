@@ -14,6 +14,7 @@ export type DrxErrorCode =
   | 'refused'
   | 'step-failed'
   | 'cancelled'
+  | 'node'
 
 /**
  * A failure the user can act on. Its message is printed as it is, with no

@@ -86,6 +86,22 @@ describe.skipIf(process.platform === 'win32')(
         })
       ).toBe(newest)
     })
+    test('looks in the directory FNM_DIR names', () => {
+      const fnm = tmp('drx-fnm-')
+      const found = fakeNode(
+        join(fnm, 'node-versions/v24.2.0/installation/bin'),
+        '24.2.0'
+      )
+      expect(
+        findNewerNode({
+          env: { PATH: '', FNM_DIR: fnm },
+          script: '/x/drx',
+          home: tmp(),
+          current: '/old/node',
+          system: [],
+        })
+      ).toBe(found)
+    })
 
     test('finds none when every Node is too old or is not a Node', () => {
       const dir = tmp('drx-none-')
@@ -127,6 +143,7 @@ describe.skipIf(process.platform === 'win32')(
         current: '/old/node',
         system: [],
         stderr,
+        stdout: { write: () => true },
         run: async () => 0,
         stdio: 'ignore',
       })
@@ -145,6 +162,7 @@ describe.skipIf(process.platform === 'win32')(
         current: '/old/node',
         system: [],
         stderr,
+        stdout: { write: () => true },
         run: async () => 0,
       })
       expect(none).toBe(1)
@@ -165,10 +183,54 @@ describe.skipIf(process.platform === 'win32')(
         current: '/old/node',
         system: [],
         stderr: again,
+        stdout: { write: () => true },
         run: async () => 0,
       })
       expect(looped).toBe(1)
       expect(again.read()).toContain('this is Node 16.18.1')
+    })
+    test('prints its own failure as the one JSON document when asked for JSON', async () => {
+      let out = ''
+      const stderr = sink()
+      const code = await launch({
+        node: '16.18.1',
+        argv: ['info', '--json'],
+        script: '/x/drx',
+        env: { PATH: '' },
+        home: tmp(),
+        current: '/old/node',
+        system: [],
+        stderr: stderr,
+        stdout: { write: (chunk: string) => (out += chunk) },
+        run: async () => 0,
+      })
+      expect(code).toBe(1)
+      const document = JSON.parse(out) as {
+        ok: boolean
+        error: { code: string; message: string }
+      }
+      expect(document.ok).toBe(false)
+      expect(document.error.code).toBe('node')
+      expect(document.error.message).toContain('this is Node 16.18.1')
+      expect(stderr.read()).toContain('Error: drx needs Node')
+    })
+
+    test('passes over a DRX_NODE that is not a Node', async () => {
+      const stderr = sink()
+      const code = await launch({
+        node: '16.18.1',
+        argv: ['info'],
+        script: '/x/drx',
+        env: { PATH: '', DRX_NODE: '/nowhere/node' },
+        home: tmp(),
+        current: '/old/node',
+        system: [],
+        stderr: stderr,
+        stdout: { write: () => true },
+        run: async () => 0,
+      })
+      expect(code).toBe(1)
+      expect(stderr.read()).toContain('No newer Node was found')
     })
 
     test('runs the command itself on a Node that is new enough', async () => {
@@ -181,6 +243,7 @@ describe.skipIf(process.platform === 'win32')(
         home: tmp(),
         current: process.execPath,
         stderr,
+        stdout: { write: () => true },
         run: async (argv) => (argv[0] === 'x' ? 5 : 0),
       })
       expect(code).toBe(5)
@@ -203,6 +266,7 @@ describe('launching from the running process', () => {
         env: {},
         execPath: process.execPath,
         stderr: { write: () => true },
+        stdout: { write: () => true },
       },
       tmp(),
       pathToFileURL(file).href,
