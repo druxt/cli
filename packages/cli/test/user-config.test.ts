@@ -28,6 +28,13 @@ const write = (file: string, content: unknown) => {
 }
 
 describe('userConfigPath', () => {
+  // The XDG specification reads an empty value as unset.
+  test('falls back to ~/.config when XDG_CONFIG_HOME is empty', () => {
+    expect(userConfigPath({ XDG_CONFIG_HOME: '', HOME: '/home/a' })).toBe(
+      '/home/a/.config/drx/config.json'
+    )
+  })
+
   test('is DRX_CONFIG when that is set', () => {
     expect(userConfigPath({ DRX_CONFIG: '/etc/drx.json' })).toBe(
       '/etc/drx.json'

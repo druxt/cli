@@ -478,6 +478,12 @@ describe('drx init --install', () => {
     })
   })
 
+  // A shell reads "cd -" as the previous directory, and quoting does not change that.
+  test('prints a directory whose name starts with a hyphen as a path', async () => {
+    const dashed = await init(['./-site', '--yes', '--json'])
+    expect(JSON.parse(dashed.stdout).next[0]).toBe('cd ./-site')
+  })
+
   test('does not install with --no-install or by default', async () => {
     const install = vi.fn(async () => {})
     await init(['one', '--yes', '--no-install'], { install })

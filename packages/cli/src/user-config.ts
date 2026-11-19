@@ -28,7 +28,8 @@ type Env = Record<string, string | undefined>
 
 export function userConfigPath(env: Env): string {
   if (env.DRX_CONFIG) return env.DRX_CONFIG
-  const base = env.XDG_CONFIG_HOME ?? join(env.HOME ?? homedir(), '.config')
+  // An empty XDG_CONFIG_HOME counts as unset, as the XDG specification has it.
+  const base = env.XDG_CONFIG_HOME || join(env.HOME ?? homedir(), '.config')
   return join(base, 'drx', 'config.json')
 }
 
