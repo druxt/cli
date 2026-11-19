@@ -105,6 +105,7 @@ describe('loadUserConfig', () => {
       '{"moduleRegistries":{"a":"ftp://x"}}',
       'moduleRegistries.a must be an http or https URL',
     ],
+    ['{"banner":"no"}', 'banner must be true or false'],
     ['{"sources":[]}', 'sources must be an object'],
     ['{"sources":{"a":"npm"}}', 'sources.a must be an object'],
     [
@@ -129,6 +130,17 @@ describe('loadUserConfig', () => {
     await expect(loadUserConfig({ DRX_CONFIG: path })).rejects.toThrow(
       `${path} is invalid: ${message}.`
     )
+  })
+})
+
+describe('the banner setting', () => {
+  test('is read when it is set, and absent otherwise', async () => {
+    const path = join(home, 'config.json')
+    write(path, { banner: false })
+    expect((await loadUserConfig({ DRX_CONFIG: path })).banner).toBe(false)
+    expect(
+      (await loadUserConfig({ XDG_CONFIG_HOME: home })).banner
+    ).toBeUndefined()
   })
 })
 

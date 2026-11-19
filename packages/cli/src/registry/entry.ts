@@ -33,8 +33,10 @@ export type EngineStep = string | { run: string; dir: string }
  */
 export interface StarterEngine {
   name: string
-  /** What the user reads in a prompt and under "It needs". */
+  /** The engine's name as the user reads it in a prompt. */
   label: string
+  /** What the engine needs on the machine, as a phrase. The label when absent. */
+  needs?: string
   /** The commands the engine needs on PATH. */
   commands: string[]
   /** The databases it can be set up with, the default first. */
@@ -50,6 +52,12 @@ export interface StarterEngine {
   files?: string[]
   /** The URL the engine serves the backend at, when it is fixed. */
   baseUrl?: string
+  /**
+   * The project name the starter ships with, and the files that hold it.
+   * `init` writes a name made from the site's directory in its place, there
+   * and in `baseUrl`, so two sites from one starter are two projects.
+   */
+  project?: { name: string; files: string[] }
 }
 
 /** Where a starter reads the URL of its backend from. */
@@ -80,11 +88,15 @@ export interface StarterDetails {
    * the backend exists already.
    */
   steps?: string[]
+  /** One sentence on what the starter is, for the prompt that lists it. */
+  description?: string
   /** The ways the backend can be run. Supersedes `requires.commands`. */
   engines?: StarterEngine[]
   backendUrl?: BackendUrlTarget
   /** What the install of the site's package manager does past installing. */
   install?: StarterInstall
+  /** What the starter still needs from a backend that exists already. */
+  existingBackend?: { notes?: string[] }
 }
 
 export interface StarterInstall {
@@ -92,6 +104,12 @@ export interface StarterInstall {
   runs?: string[]
   /** What to know once it has run, such as how to start the backend again. */
   notes?: string[]
+  /**
+   * How to tell that the install did run those steps: a file in the site that
+   * exists afterwards and holds each of these strings. Without it, the install
+   * is taken at its word.
+   */
+  done?: { file: string; contains?: string[] }
 }
 
 /** A giget registry entry with the `druxt` object `init` needs. */
@@ -173,6 +191,9 @@ function enginesProblem(value: unknown): string | undefined {
     if (!isNonEmptyString(engine.label)) {
       return `${at}.label must be a non-empty string`
     }
+    if (engine.needs !== undefined && !isNonEmptyString(engine.needs)) {
+      return `${at}.needs must be a non-empty string`
+    }
     if (!Array.isArray(engine.commands)) {
       return `${at}.commands must be an array of command names`
     }
@@ -200,6 +221,24 @@ function enginesProblem(value: unknown): string | undefined {
     }
     if (engine.baseUrl !== undefined && !isHttpUrl(engine.baseUrl)) {
       return `${at}.baseUrl must be an http or https URL`
+    }
+    const project = engine.project
+    if (project !== undefined) {
+      if (!isRecord(project)) return `${at}.project must be an object`
+      if (
+        typeof project.name !== 'string' ||
+        !/^[a-z0-9][a-z0-9-]*$/.test(project.name)
+      ) {
+        return `${at}.project.name must be a lower-case name`
+      }
+      if (!Array.isArray(project.files)) {
+        return `${at}.project.files must be an array of paths`
+      }
+      for (const [position, file] of project.files.entries()) {
+        if (!isInsidePath(file)) {
+          return `${at}.project.files[${position}] ${INSIDE}`
+        }
+      }
     }
     if (engine.files !== undefined) {
       if (!Array.isArray(engine.files)) {
@@ -277,6 +316,12 @@ function entryProblem(entry: unknown): string | undefined {
   if (druxt.steps !== undefined && !isStringArray(druxt.steps)) {
     return 'druxt.steps must be an array of strings'
   }
+  if (
+    druxt.description !== undefined &&
+    typeof druxt.description !== 'string'
+  ) {
+    return 'druxt.description must be a string'
+  }
   const install = druxt.install
   if (install !== undefined) {
     if (!isRecord(install)) return 'druxt.install must be an object'
@@ -284,6 +329,23 @@ function entryProblem(entry: unknown): string | undefined {
       if (install[key] !== undefined && !isStringArray(install[key])) {
         return `druxt.install.${key} must be an array of strings`
       }
+    }
+    const done = install.done
+    if (done !== undefined) {
+      if (!isRecord(done)) return 'druxt.install.done must be an object'
+      if (!isNonEmptyString(done.file) || !isInsidePath(done.file)) {
+        return 'druxt.install.done.file must be a path inside the site'
+      }
+      if (done.contains !== undefined && !isStringArray(done.contains)) {
+        return 'druxt.install.done.contains must be an array of strings'
+      }
+    }
+  }
+  const existing = druxt.existingBackend
+  if (existing !== undefined) {
+    if (!isRecord(existing)) return 'druxt.existingBackend must be an object'
+    if (existing.notes !== undefined && !isStringArray(existing.notes)) {
+      return 'druxt.existingBackend.notes must be an array of strings'
     }
   }
   return enginesProblem(druxt.engines) ?? backendUrlProblem(druxt.backendUrl)

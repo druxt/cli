@@ -9,6 +9,7 @@ import {
 } from '../registry/entry.js'
 import { isHttpUrl } from '../validate.js'
 import { trimEndSlashes } from '../slashes.js'
+import type { EngineProject } from './project-name.js'
 
 /** What the flags say about the engine. Each is undefined when not given. */
 export interface EngineOptions {
@@ -20,8 +21,10 @@ export interface EngineOptions {
 /** The engine a site is created with, and what follows from the choice. */
 export interface EngineChoice {
   name: string
-  /** What the site needs for this engine, as a phrase. */
+  /** The engine's name as the user reads it. */
   label: string
+  /** What the site needs for this engine, as a phrase. */
+  needs: string
   /** The commands the engine needs on PATH. */
   commands: string[]
   database?: string
@@ -29,6 +32,10 @@ export interface EngineChoice {
   baseUrl?: string
   /** The URL to write where the starter reads its backend URL from. */
   writeUrl?: string
+  /** The project name the starter ships with, to be replaced by the site's. */
+  project?: EngineProject
+  /** The site's own project name, once the directory is known. */
+  projectName?: string
   steps: EngineStep[]
   notes: string[]
   /** The paths the chosen engine needs. */
@@ -159,11 +166,12 @@ async function existingBackend(
   return {
     name: EXISTING_BACKEND,
     label: `A backend that exists already, at ${baseUrl}`,
+    needs: `A backend that exists already, at ${baseUrl}`,
     commands: [],
     baseUrl,
     writeUrl: baseUrl,
     steps: entry.druxt.steps ?? [],
-    notes: [],
+    notes: entry.druxt.existingBackend?.notes ?? [],
     keep: [],
     remove: engines.flatMap((engine) => engine.files ?? []),
   }
@@ -215,9 +223,11 @@ export async function chooseEngine(
   return {
     name,
     label: engine.label,
+    needs: engine.needs ?? engine.label,
     commands: engine.commands,
     ...(database ? { database } : {}),
     ...(engine.baseUrl ? { writeUrl: engine.baseUrl } : {}),
+    ...(engine.project ? { project: engine.project } : {}),
     steps: engine.steps,
     notes: engine.notes ?? [],
     keep: engine.files ?? [],

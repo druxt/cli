@@ -7,3 +7,8 @@ export function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_@%+:,./-]+$/.test(value)) return value
   return `'${value.replaceAll("'", `'\\''`)}'`
 }
+
+/** The command line that runs `drx` with these arguments. */
+export function repeatCommand(argv: string[]): string {
+  return ['drx', ...argv.map(shellQuote)].join(' ')
+}

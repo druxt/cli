@@ -233,6 +233,9 @@ test:pack:
     - test -f node_modules/@druxt/cli/starters/index.json
     - ./node_modules/.bin/drx info
     - ./node_modules/.bin/create-druxt --help
+    # The unattended path, as a pipeline runs it: no prompt, defaults applied.
+    - ./node_modules/.bin/drx init pack-site --yes --no-interactive --json
+    - test -f pack-site/drx.config.json
     - section_end "pack"
 
 # The one job that needs the network: it creates a site from the real

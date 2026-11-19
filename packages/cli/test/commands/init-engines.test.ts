@@ -82,6 +82,7 @@ function answering(answers: Record<string, unknown>) {
     return answers[message]
   }
   const prompter: Prompter = {
+    search: async ({ message, choices }) => answer(message, choices) as never,
     text: async ({ message }) => answer(message) as string,
     select: async ({ message, choices }) => answer(message, choices) as never,
     confirm: async ({ message }) => answer(message) as boolean,
@@ -140,6 +141,119 @@ describe('drx init --engine', () => {
   test('writes no URL for an engine that has none of its own', async () => {
     await init(['--yes', '--engine', 'php'])
     expect(has('.env')).toBe(false)
+  })
+
+  test('names an engine by its label and lists what it needs apart from it', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      const engines = druxt.engines as Record<string, unknown>[]
+      engines[0]!.label = 'Local PHP with SQLite'
+      engines[0]!.needs = 'PHP 8.3 or newer, and Composer'
+    })
+    const result = await init(['--yes', '--engine', 'php'])
+    expect(result.stdout).toContain(
+      'It needs:\n  Node 16.18.1\n  PHP 8.3 or newer, and Composer\n'
+    )
+    expect(result.stdout).not.toContain('Local PHP with SQLite')
+  })
+
+  // A starter ships with one project name. Two sites made from it would otherwise be one project to the
+  // engine, sharing a database and an address.
+  test('names the project of the engine after the site, in its files and in the URL', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      const engines = druxt.engines as Record<string, unknown>[]
+      engines[1]!.project = {
+        name: 'fixture',
+        files: ['drupal/.ddev/config.yaml'],
+      }
+    })
+    const result = await run(
+      [
+        'init',
+        'My Site_2',
+        '--yes',
+        '--engine',
+        'ddev',
+        '--json',
+        '--registry',
+        registry.url,
+      ],
+      { cwd, nodeVersion: '16.18.1', findCommand: everything }
+    )
+    expect(result.code).toBe(0)
+    const made = join(cwd, 'My Site_2')
+    expect(readFileSync(join(made, 'drupal/.ddev/config.yaml'), 'utf8')).toBe(
+      'name: my-site-2\n'
+    )
+    expect(readFileSync(join(made, '.env'), 'utf8')).toContain(
+      'BASE_URL=http://my-site-2.ddev.site'
+    )
+  })
+
+  test('makes a project name in one pass, whatever the directory is called', async () => {
+    const { siteProjectName } =
+      await import('../../src/engines/project-name.js')
+    expect(siteProjectName('/tmp/--My  Shop__2--')).toBe('my-shop-2')
+    expect(siteProjectName('/tmp/___')).toBe('druxt-site')
+    const started = performance.now()
+    expect(siteProjectName(`/tmp/${'-'.repeat(200_000)}x`)).toBe('x')
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
+  test('refuses a project name that is not a plain lower-case name', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      const engines = druxt.engines as Record<string, unknown>[]
+      engines[1]!.project = {
+        name: 'Not Plain',
+        files: ['drupal/.ddev/config.yaml'],
+      }
+    })
+    const result = await init(['--yes', '--engine', 'ddev', '--json'])
+    expect(result.code).toBe(1)
+    expect(JSON.parse(result.stdout).error.message).toContain(
+      'druxt.engines[1].project.name'
+    )
+  })
+
+  // A backend that exists already is set up by nobody here, so the starter says what it still needs from it.
+  test('prints what the starter needs from a backend that exists already', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      druxt.existingBackend = {
+        notes: [
+          'Set OAUTH_CLIENT_ID in .env to the client ID of a consumer on that backend.',
+        ],
+      }
+    })
+    const result = await init([
+      '--yes',
+      '--engine',
+      'none',
+      '--base-url',
+      'https://example.com',
+      '--json',
+    ])
+    expect(JSON.parse(result.stdout).notes).toContain(
+      'Set OAUTH_CLIENT_ID in .env to the client ID of a consumer on that backend.'
+    )
+    const local = await run(
+      [
+        'init',
+        'local',
+        '--yes',
+        '--engine',
+        'php',
+        '--json',
+        '--registry',
+        registry.url,
+      ],
+      { cwd, nodeVersion: '16.18.1', findCommand: everything }
+    )
+    expect(JSON.parse(local.stdout).notes.join(' ')).not.toContain(
+      'OAUTH_CLIENT_ID'
+    )
   })
 
   test('prints what the engine needs, its steps and its notes', async () => {
@@ -499,6 +613,7 @@ describe('drx init at a terminal with engines', () => {
   const base = {
     'Which layout?': 'monorepo',
     'Install its dependencies now?': false,
+    'Create the site?': true,
   }
 
   test('lists the installed engines first, marks the others, and ends with none', async () => {
@@ -529,6 +644,7 @@ describe('drx init at a terminal with engines', () => {
       'Which layout?',
       'How should the backend run?',
       'Install its dependencies now?',
+      'Create the site?',
     ])
   })
 
@@ -581,6 +697,7 @@ describe('drx init at a terminal with engines', () => {
     expect(asked.map(({ message }) => message)).toEqual([
       'Which layout?',
       'Install its dependencies now?',
+      'Create the site?',
     ])
   })
 })

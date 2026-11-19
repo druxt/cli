@@ -14,6 +14,7 @@ import {
   type LoadedModules,
 } from '../modules/registry.js'
 import { columns, createOutput, type Output } from '../output.js'
+import { repeatCommand } from '../repeat.js'
 import { loadUserConfig, resolveModuleRegistryUrl } from '../user-config.js'
 
 const registryArgs = {
@@ -223,6 +224,7 @@ function listCommand(context: CliContext) {
     async run({ args: parsed, rawArgs }) {
       assertKnownOptions(rawArgs, args, 'module list')
       const output = createOutput(context, parsed.json === true)
+      output.header()
       const loaded = await openModules(context, parsed, output)
       const project = await moduleProject(context.cwd)
       if (project) noteProject(project, output)
@@ -264,6 +266,7 @@ function searchCommand(context: CliContext) {
         )
       }
       const output = createOutput(context, parsed.json === true)
+      output.header()
       const loaded = await openModules(context, parsed, output)
       const project = await moduleProject(context.cwd)
       if (project) noteProject(project, output)
@@ -358,7 +361,8 @@ function infoText(
   module: ModuleEntry,
   backend: ReturnType<typeof backendReport>,
   project: ModuleProject | undefined,
-  states: ModuleInPart[]
+  states: ModuleInPart[],
+  output: Output
 ): string {
   const lines = [module.name]
   if (module.description) lines.push(module.description)
@@ -404,7 +408,8 @@ function infoText(
     const asked = state.declared ? ` (asked for as ${state.declared})` : ''
     lines.push(
       '',
-      `In ${state.path}/:`,
+      // Every part a module is installed in is a frontend part.
+      output.out.role('frontend', `In ${state.path}/:`),
       ...columns(
         [
           ['Installed', `${state.installed ?? 'no'}${asked}`],
@@ -437,7 +442,7 @@ function infoCommand(context: CliContext) {
   return defineCommand({
     meta: {
       name: 'info',
-      description: 'Show one module: its package, range, needs and links',
+      description: 'Details of one module: its package, range, needs and links',
     },
     args,
     async run({ args: parsed, rawArgs }) {
@@ -450,28 +455,69 @@ function infoCommand(context: CliContext) {
         )
       }
       const output = createOutput(context, parsed.json === true)
+      output.header()
       const loaded = await openModules(context, parsed, output)
-      const module = findModule(loaded.modules, wanted)
-      const project = await moduleProject(context.cwd)
-      const states = project ? await project.state(module) : []
-      const backend = backendReport(module, loaded.modules)
-
-      output.result(
-        {
-          registry: registryReport(loaded),
-          project: projectReport(project),
-          module: {
-            ...rowReport(module),
-            repository: repositoryUrl(module),
-            ...(module.website ? { website: module.website } : {}),
-            backend,
-            ...(project ? { parts: states } : {}),
-          },
-        },
-        infoText(module, backend, project, states)
+      await showModule(
+        findModule(loaded.modules, wanted),
+        loaded,
+        context,
+        output
       )
     },
   })
+}
+
+/** Prints one module in full, with its state in the project around `cwd`. */
+async function showModule(
+  module: ModuleEntry,
+  loaded: LoadedModules,
+  context: CliContext,
+  output: Output
+): Promise<void> {
+  const project = await moduleProject(context.cwd)
+  const states = project ? await project.state(module) : []
+  const backend = backendReport(module, loaded.modules)
+  output.result(
+    {
+      registry: registryReport(loaded),
+      project: projectReport(project),
+      module: {
+        ...rowReport(module),
+        repository: repositoryUrl(module),
+        ...(module.website ? { website: module.website } : {}),
+        backend,
+        ...(project ? { parts: states } : {}),
+      },
+    },
+    infoText(module, backend, project, states, output)
+  )
+}
+
+/**
+ * `drx module` with no command, in a terminal: a list of the modules to
+ * narrow by typing, then the one picked shown as `drx module info` shows it.
+ */
+async function pickModule(
+  context: CliContext,
+  parsed: Parsed,
+  output: Output
+): Promise<void> {
+  output.header()
+  const loaded = await openModules(context, parsed, output)
+  const listed = loaded.modules
+    .filter((module) => !module.archived)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  const name = await context.prompter.search({
+    message: 'Which module?',
+    choices: listed.map((module) => ({
+      value: module.name,
+      label: module.name,
+      hint: `${module.npm ?? 'not published'}. ${module.description}`.trim(),
+    })),
+  })
+  await showModule(findModule(listed, name), loaded, context, output)
+  output.line()
+  output.line(`Repeat this with: ${repeatCommand(['module', 'info', name])}`)
 }
 
 /**
@@ -491,18 +537,32 @@ function notAvailable(name: string, description: string) {
 }
 
 export function moduleCommand(context: CliContext) {
+  const subCommands = {
+    list: listCommand(context),
+    search: searchCommand(context),
+    info: infoCommand(context),
+    add: notAvailable('add', 'Install a module and add it to the project'),
+    remove: notAvailable('remove', 'Take a module out of the project'),
+    configure: notAvailable('configure', 'Set the options of a module'),
+  }
   return defineCommand({
     meta: {
       name: 'module',
-      description: 'List, search and show the modules in the Druxt registry',
+      description: 'List, search and view the modules in the Druxt registry',
     },
-    subCommands: {
-      list: listCommand(context),
-      search: searchCommand(context),
-      info: infoCommand(context),
-      add: notAvailable('add', 'Install a module and add it to the project'),
-      remove: notAvailable('remove', 'Take a module out of the project'),
-      configure: notAvailable('configure', 'Set the options of a module'),
+    args: registryArgs,
+    subCommands,
+    // citty runs this after a subcommand as well as in place of one.
+    async run({ args: parsed, rawArgs }) {
+      if (rawArgs.some((argument) => argument in subCommands)) return
+      if (!context.interactive || parsed.json === true) {
+        throw new DrxError(
+          'usage',
+          'No command specified. Run "drx module --help" for the module commands.'
+        )
+      }
+      assertKnownOptions(rawArgs, registryArgs, 'module')
+      await pickModule(context, parsed, createOutput(context, false))
     },
   })
 }

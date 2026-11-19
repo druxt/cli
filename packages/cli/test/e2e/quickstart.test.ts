@@ -63,8 +63,12 @@ describe.skipIf(process.env.DRX_E2E !== '1')('the quickstart starter', () => {
     expect(
       existsSync(join(site, 'drupal/.ddev/commands/web/drupal-install'))
     ).toBe(true)
+    // The project carries the site's name, not the starter's, in its file and in the URL.
     expect(readFileSync(join(site, '.env'), 'utf8')).toContain(
-      'BASE_URL=https://druxt-quickstart.lndo.site'
+      'BASE_URL=https://site.lndo.site'
+    )
+    expect(readFileSync(join(site, 'drupal/.lando.yml'), 'utf8')).toContain(
+      'name: site'
     )
   }, 120_000)
 

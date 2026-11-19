@@ -12,12 +12,16 @@ import { DEFAULT_REGISTRY } from './registry/registry.js'
 export interface TextStream {
   write(chunk: string): unknown
   isTTY?: boolean
+  /** The width of the terminal, when the stream is one. */
+  columns?: number
 }
 
 export interface Choice<T extends string> {
   value: T
   label: string
   hint?: string
+  /** Shown, and not selectable. */
+  disabled?: boolean
 }
 
 /** The questions a command may ask a person at the terminal. */
@@ -27,6 +31,11 @@ export interface Prompter {
     message: string
     choices: Choice<T>[]
     initial?: T
+  }): Promise<T>
+  /** A list the user narrows by typing, for more choices than fit a screen. */
+  search<T extends string>(question: {
+    message: string
+    choices: Choice<T>[]
   }): Promise<T>
   confirm(question: { message: string; initial: boolean }): Promise<boolean>
 }
@@ -49,6 +58,11 @@ export interface CliContext {
   stderr: TextStream
   /** True when a person is at the terminal to answer a prompt. */
   interactive: boolean
+  /**
+   * The flag or variable that turned the questions off when there is a
+   * terminal to ask on. Undefined when nothing did, or there is none.
+   */
+  questionsOff?: string
   /** The running Node version, without the leading `v`. */
   nodeVersion: string
   now: () => Date

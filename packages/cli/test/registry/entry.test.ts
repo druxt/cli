@@ -146,6 +146,7 @@ describe('validateEntry', () => {
     ],
     ['druxt.default', 'yes', 'druxt.default must be true or false'],
     ['druxt.steps', 'npm run dev', 'druxt.steps must be an array of strings'],
+    ['druxt.description', 7, 'druxt.description must be a string'],
     ['druxt.install', 'npm install', 'druxt.install must be an object'],
     [
       'druxt.install',

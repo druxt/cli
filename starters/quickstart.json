@@ -5,10 +5,19 @@
   "url": "https://github.com/druxt/quickstart",
   "druxt": {
     "line": "0.x",
+    "description": "Drupal 11, Nuxt 2 and Druxt 1 in one repository",
     "layout": "monorepo",
     "parts": [
-      { "role": "frontend", "kind": "nuxt", "path": "nuxt" },
-      { "role": "backend", "kind": "drupal", "path": "drupal" }
+      {
+        "role": "frontend",
+        "kind": "nuxt",
+        "path": "nuxt"
+      },
+      {
+        "role": "backend",
+        "kind": "drupal",
+        "path": "drupal"
+      }
     ],
     "requires": {
       "node": "16.18.1",
@@ -25,12 +34,14 @@
     "engines": [
       {
         "name": "php",
-        "label": "PHP 8.3 or newer with the pdo_sqlite extension, and Composer",
+        "label": "Local PHP with SQLite",
+        "needs": "PHP 8.3 or newer with the pdo_sqlite extension, and Composer",
         "commands": ["php", "composer"],
         "databases": ["sqlite"],
         "steps": ["npm run setup", "npm run dev"],
         "notes": [
-          "This engine does not run on Windows itself. Use WSL2 there, or another engine."
+          "This engine does not run on Windows itself. Use WSL2 there, or another engine.",
+          "npm run dev starts the backend again when it is not running."
         ],
         "files": []
       },
@@ -42,15 +53,28 @@
         "baseUrl": "http://quickstart-druxtsite.ddev.site",
         "steps": [
           "npm run setup",
-          { "run": "ddev start", "dir": "drupal" },
-          { "run": "ddev drupal-install", "dir": "drupal" },
-          { "run": "ddev druxt-add-consumer", "dir": "drupal" },
+          {
+            "run": "ddev start",
+            "dir": "drupal"
+          },
+          {
+            "run": "ddev drupal-install",
+            "dir": "drupal"
+          },
+          {
+            "run": "ddev druxt-add-consumer",
+            "dir": "drupal"
+          },
           "npm run dev"
         ],
         "notes": [
           "ddev druxt-add-consumer prints OAUTH_CLIENT_ID. Copy it into .env before npm run dev."
         ],
-        "files": ["drupal/.ddev"]
+        "files": ["drupal/.ddev"],
+        "project": {
+          "name": "quickstart-druxtsite",
+          "files": ["drupal/.ddev/config.yaml"]
+        }
       },
       {
         "name": "lando",
@@ -60,22 +84,41 @@
         "baseUrl": "https://druxt-quickstart.lndo.site",
         "steps": [
           "npm run setup",
-          { "run": "lando start", "dir": "drupal" },
-          { "run": "lando drupal-install", "dir": "drupal" },
-          { "run": "lando druxt-add-consumer", "dir": "drupal" },
+          {
+            "run": "lando start",
+            "dir": "drupal"
+          },
+          {
+            "run": "lando drupal-install",
+            "dir": "drupal"
+          },
+          {
+            "run": "lando druxt-add-consumer",
+            "dir": "drupal"
+          },
           "npm run dev"
         ],
         "notes": [
           "lando druxt-add-consumer prints OAUTH_CLIENT_ID. Copy it into .env before npm run dev."
         ],
-        "files": ["drupal/.lando.yml", "drupal/.ddev/commands"]
+        "files": ["drupal/.lando.yml", "drupal/.ddev/commands"],
+        "project": {
+          "name": "druxt-quickstart",
+          "files": ["drupal/.lando.yml"]
+        },
+        "needs": "Docker, and a Lando that has the drupal11 recipe"
       }
     ],
     "install": {
       "runs": ["npm run setup"],
+      "done": {
+        "file": ".env",
+        "contains": ["BASE_URL=", "OAUTH_CLIENT_ID="]
+      }
+    },
+    "existingBackend": {
       "notes": [
-        "npm install ran the setup. If it said it could not, run npm run setup once what it named is in place.",
-        "With the php engine, npm run dev starts the backend again when it is not running. A DDEV, Lando or existing backend is started where it runs."
+        "Set OAUTH_CLIENT_ID in .env to the client ID of an OAuth consumer on that Drupal before npm run dev. The site does not start without one."
       ]
     }
   }

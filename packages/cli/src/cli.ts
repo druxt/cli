@@ -1,18 +1,36 @@
 import { stripVTControlCharacters } from 'node:util'
-import { defineCommand, renderUsage, runCommand, type CommandDef } from 'citty'
+import {
+  defineCommand,
+  renderUsage,
+  runCommand,
+  type ArgsDef,
+  type CommandDef,
+} from 'citty'
 import { infoCommand } from './commands/info.js'
 import { initCommand } from './commands/init.js'
+import { runMenu } from './commands/menu.js'
 import { moduleCommand } from './commands/module.js'
 import { defaultContext, type CliContext, type TextStream } from './context.js'
 import { DrxError } from './errors.js'
+import { createOutput } from './output.js'
 import { cliVersion } from './package-root.js'
 
-function mainCommand(context: CliContext) {
-  return defineCommand({
+/** `drx` and every command under it. */
+export function mainCommand(context: CliContext): CommandDef {
+  return defineCommand<ArgsDef>({
     meta: {
       name: 'drx',
       version: cliVersion(),
       description: 'The Druxt command-line tool',
+    },
+    args: {
+      interactive: {
+        type: 'boolean',
+        default: true,
+        description: 'Ask for what is missing when there is a terminal',
+        negativeDescription:
+          'Never ask, draw or wait: for CI and scripts. DRX_NO_INTERACTIVE=1 does the same',
+      },
     },
     subCommands: {
       init: initCommand(context),
@@ -45,7 +63,9 @@ async function usage(
   let command = main
   let parent: CommandDef | undefined
   let path = 'drx'
-  for (const name of argv.filter((argument) => !argument.startsWith('-'))) {
+  // With the options after the command, a value is never taken for a name.
+  const names = optionsAfterCommand(main, argv)
+  for (const name of names.filter((argument) => !argument.startsWith('-'))) {
     const next = (
       command.subCommands as Record<string, CommandDef> | undefined
     )?.[name]
@@ -59,6 +79,102 @@ async function usage(
     return renderUsage({ ...command, meta })
   }
   return renderUsage(command, parent)
+}
+
+/** True when an option takes the argument after it as its value. */
+function takesValue(option: string, args: ArgsDef): boolean {
+  if (option.includes('=')) return false
+  const name = option.replace(/^--?/, '')
+  return Object.entries(args).some(([key, definition]) => {
+    if (definition.type !== 'string' && definition.type !== 'enum') return false
+    const alias = 'alias' in definition ? definition.alias : undefined
+    return key === name || [alias ?? []].flat().includes(name)
+  })
+}
+
+const argsOf = (command: CommandDef) => (command.args ?? {}) as ArgsDef
+
+/** Every command under one, each with the names that lead to it. */
+function commandPaths(
+  command: CommandDef,
+  path: string[] = []
+): { path: string[]; command: CommandDef }[] {
+  const below = (command.subCommands ?? {}) as Record<string, CommandDef>
+  return [
+    ...(path.length > 0 ? [{ path, command }] : []),
+    ...Object.entries(below).flatMap(([name, next]) =>
+      commandPaths(next, [...path, name])
+    ),
+  ]
+}
+
+/**
+ * Where the names that lead to a command are in the arguments, when nothing
+ * but options comes before each. An option is read as the command itself
+ * defines it, so the argument after one that takes a value is its value and
+ * never a name. Undefined when the arguments do not name the command.
+ */
+function namesAt(
+  argv: string[],
+  path: string[],
+  args: ArgsDef
+): number[] | undefined {
+  const found: number[] = []
+  let index = 0
+  for (const name of path) {
+    while (argv[index]?.startsWith('-') && argv[index] !== '--') {
+      index += takesValue(argv[index] as string, args) ? 2 : 1
+    }
+    if (argv[index] !== name) return undefined
+    found.push(index)
+    index += 1
+  }
+  return found
+}
+
+/**
+ * The arguments with every option moved to after the command it was given
+ * before, so `--json module --type contrib list` reads as
+ * `module list --json --type contrib`. citty hands a command only what
+ * follows its name, and an option before it would be dropped without a
+ * word, or its value taken for the name of a command. The command then
+ * takes the option or refuses it, as it does one given after its name. The
+ * options of `drx` itself stay where they are.
+ */
+export function optionsAfterCommand(
+  main: CommandDef,
+  argv: string[]
+): string[] {
+  // The longest run of names the arguments start with is the command. Of
+  // two as long, it is the one that takes more of what comes first as the
+  // values of its own options.
+  let names: number[] = []
+  for (const { path, command } of commandPaths(main)) {
+    const found = namesAt(argv, path, argsOf(command))
+    if (!found || found.length < names.length) continue
+    const later = (found.at(-1) as number) > (names.at(-1) ?? -1)
+    if (found.length > names.length || later) names = found
+  }
+  const last = names.at(-1)
+  if (last === undefined) return argv
+
+  const own = new Set(
+    Object.entries(argsOf(main)).flatMap(([name, definition]) =>
+      definition.type === 'boolean' ? [`--${name}`, `--no-${name}`] : []
+    )
+  )
+  const kept: string[] = []
+  const moved: string[] = []
+  for (const [index, argument] of argv.slice(0, last).entries()) {
+    if (names.includes(index)) continue
+    ;(own.has(argument) ? kept : moved).push(argument)
+  }
+  return [
+    ...kept,
+    ...names.map((index) => argv[index] as string),
+    ...moved,
+    ...argv.slice(last + 1),
+  ]
 }
 
 /** The code and message to report for anything a command throws. */
@@ -81,17 +197,31 @@ function describe(error: unknown): { code: string; message: string } {
   }
 }
 
+/** The flag that turns every prompt off. It goes before or after a command. */
+const NO_INTERACTIVE = '--no-interactive'
+
 /**
- * Runs the CLI with the given arguments and returns the exit code. It never
- * exits the process or throws, so a caller decides what to do with the code.
+ * What says nothing may be asked although there is a terminal: `CI`,
+ * `DRX_NO_INTERACTIVE` or `--no-interactive`, each of which says no whatever
+ * the terminal is. A command then takes its defaults, and fails naming the
+ * flag of a value that has none. Undefined when nothing turned the questions
+ * off, or when there is no terminal to ask on in the first place.
  */
-export async function runCli(
-  argv: string[],
-  overrides: Partial<CliContext> = {}
-): Promise<number> {
-  const context = { ...defaultContext(), ...overrides }
+function questionsOff(context: CliContext, argv: string[]): string | undefined {
+  const on = (value: string | undefined) =>
+    value !== undefined && value !== '' && value !== '0' && value !== 'false'
+  if (!context.interactive) return undefined
+  if (argv.includes(NO_INTERACTIVE)) return NO_INTERACTIVE
+  if (on(context.env.DRX_NO_INTERACTIVE)) return 'DRX_NO_INTERACTIVE'
+  if (on(context.env.CI)) return 'CI'
+  return undefined
+}
+
+/** Runs one command line in a context that is already settled. */
+async function execute(argv: string[], context: CliContext): Promise<number> {
   const main = mainCommand(context)
   const { stdout, stderr } = context
+  const json = argv.includes('--json')
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
@@ -104,20 +234,49 @@ export async function runCli(
       stdout.write(`${cliVersion()}\n`)
       return 0
     }
-    if (argv.length === 0) {
+    // Bare `drx`: a menu for a person, the usage for anything else.
+    if (argv.every((argument) => argument === '--no-banner')) {
+      if (context.interactive) {
+        return await runMenu(context, { banner: argv.length === 0 }, (next) =>
+          execute(next, context)
+        )
+      }
       stderr.write(`${plain(stderr, await renderUsage(main))}\n`)
       return 1
     }
-    await runCommand(main, { rawArgs: argv })
+    await runCommand(main, { rawArgs: optionsAfterCommand(main, argv) })
     return 0
   } catch (error) {
     const failure = describe(error)
-    if (argv.includes('--json')) {
+    if (json) {
       stdout.write(
         `${JSON.stringify({ ok: false, error: failure }, null, 2)}\n`
       )
     }
-    stderr.write(`Error: ${failure.message}\n`)
+    // In a terminal the line carries the mark for a failure. The word stays.
+    const output = createOutput(context, json)
+    const mark = output.decorated ? `${output.err.mark('failed')} ` : ''
+    stderr.write(`${mark}Error: ${failure.message}\n`)
     return 1
   }
+}
+
+/**
+ * Runs the CLI with the given arguments and returns the exit code. It never
+ * exits the process or throws, so a caller decides what to do with the code.
+ */
+export async function runCli(
+  argv: string[],
+  overrides: Partial<CliContext> = {}
+): Promise<number> {
+  const context = { ...defaultContext(), ...overrides }
+  const off = questionsOff(context, argv)
+  return execute(
+    argv.filter((argument) => argument !== NO_INTERACTIVE),
+    {
+      ...context,
+      interactive: context.interactive && off === undefined,
+      ...(off === undefined ? {} : { questionsOff: off }),
+    }
+  )
 }
