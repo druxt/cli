@@ -46,6 +46,11 @@ export interface Prompter {
   confirm(question: { message: string; initial: boolean }): Promise<boolean>
 }
 
+/** The version in DRX_RELAUNCHED, when it holds one. */
+export function shellNode(value: string | undefined): string | undefined {
+  return value && /^\d+\.\d+\.\d+$/.test(value) ? value : undefined
+}
+
 /**
  * Everything a command takes from the process it runs in. The tests pass
  * their own, so no command reads `process` directly.
@@ -110,7 +115,9 @@ export function defaultContext(): CliContext {
     stdout: process.stdout,
     stderr: process.stderr,
     interactive: Boolean(process.stdin.isTTY && process.stderr.isTTY),
-    nodeVersion: process.versions.node,
+    // After a relaunch on a newer Node, the Node the user's shell is on: it is
+    // the one a site is installed and run with.
+    nodeVersion: shellNode(process.env.DRX_RELAUNCHED) ?? process.versions.node,
     now: () => new Date(),
     fetch: globalThis.fetch,
     prompter: terminalPrompter(),

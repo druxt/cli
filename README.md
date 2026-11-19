@@ -29,6 +29,12 @@ You will need Node 22.12 or newer to run the CLI. The site it creates has its ow
 
 `npx drx` does not work outside a project that has `@druxt/cli` installed. Another package holds the name `drx` on npm, so `npx drx` downloads that package and not this one. Use `npx @druxt/cli`.
 
+## Node
+
+`drx` runs on Node 22.12 or later. A site may pin an older Node for itself, as the 0.x starter pins Node 16, and a version manager then switches to it in the site's directory. `drx` still works there: started on an older Node, it runs the same command again on a newer Node from the machine. It looks beside its own binary first, which is the Node it was installed with, then along `PATH`, then where mise, nvm, fnm, Volta and asdf keep their installs.
+
+The tools a command starts, such as the site's package manager, come from your own `PATH`, so the site is installed with the Node it runs on. Set `DRX_NODE` to the path of a `node` binary to choose the Node `drx` runs on yourself.
+
 ## Commands
 
 An option goes before or after the name of its command, with its value as the next argument or after `=`. `drx --json module --type contrib list` is `drx module list --json --type=contrib`, and `drx --json info` is `drx info --json`. An option the command does not have is refused wherever it is.
