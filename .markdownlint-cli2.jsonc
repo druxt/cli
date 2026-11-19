@@ -2,11 +2,13 @@
   // MD013 (line length) is off: prose reflows, and a hard wrap in Markdown
   // shows up as a diff on every edit to the paragraph, not the sentence.
   // MD024 is scoped to siblings so a changelog can repeat "Fixed" per release.
+  // MD033 allows the two elements of the README banner, a linked image.
   // MD041 is off: a changeset starts with front matter, not a heading.
   "config": {
     "default": true,
     "MD013": false,
     "MD024": { "siblings_only": true },
+    "MD033": { "allowed_elements": ["a", "img"] },
     "MD041": false
   },
   "ignores": [
