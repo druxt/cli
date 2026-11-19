@@ -15,22 +15,45 @@ nothing.
 The toolchain is pinned in `.mise.toml`. With [mise](https://mise.jdx.dev)
 installed, `mise install` gives you the same Node the pipeline uses.
 
+To run the CLI from your checkout:
+
+```bash
+npm run build
+node packages/cli/dist/bin.js --help
+```
+
 ## Before you push
 
 ```bash
 npm run lint        # every check except prose, which needs Vale installed
 npm run typecheck
-npm test            # vitest, with coverage reported
+npm test            # vitest, with the coverage floor enforced
 ```
 
-The pre-commit hook runs all three. The tests run offline.
+The pre-commit hook runs all three. Because the unit tests serve their own
+fixture registry and tarball from a loopback port, they run offline. `npm run test:e2e` is the
+one test that downloads the real starter, and it is not in the hook.
 
 ## Tests
 
-Write the test before the code it covers, and see it fail. The tests of the
-repository's own tooling are in `test/`.
+Write the test before the code it covers, and see it fail. A change to a
+command needs a test that runs the command through `runCli`, as
+`packages/cli/test/helpers/run.ts` does.
 
-`npm test` reports coverage and does not enforce a floor yet.
+`vitest.config.ts` carries a coverage floor measured from the current tests.
+Raise it when coverage improves. Do not lower it to make a change pass.
+
+## Adding a starter
+
+Add `starters/<name>.json` and the name to `starters/index.json`. The format is
+in the README. Set `maintained` to the date you last saw the starter work, and
+run `npm run test:e2e` if the default starter changed.
+
+## Adding a kind
+
+Add a file to `packages/cli/src/adapters/` that exports a `KindAdapter`, and
+add it to the list in `packages/cli/src/adapters/index.ts`. Nothing outside
+that directory should need to change.
 
 ## Changesets
 
@@ -50,6 +73,12 @@ edit those files by hand. The first line of a changeset becomes the entry:
   `Commit: <sha>` in the body names a different one.
 
 The rest of the changeset follows as a paragraph of its own.
+
+## Releases
+
+Releases are cut from `0.x` by `.github/workflows/release.yml`. Merging the
+pull request it keeps open, titled `chore(release): version packages`, is the
+release. `RELEASING.md` has the whole process and its one-time setup.
 
 ## Commit messages
 

@@ -1,0 +1,28 @@
+{
+  "name": "quickstart",
+  "tar": "https://codeload.github.com/druxt/quickstart/tar.gz/refs/heads/develop",
+  "defaultDir": "my-druxt-site",
+  "url": "https://github.com/druxt/quickstart",
+  "druxt": {
+    "line": "0.x",
+    "layout": "monorepo",
+    "parts": [
+      { "role": "frontend", "kind": "nuxt", "path": "nuxt" },
+      { "role": "backend", "kind": "drupal", "path": "drupal" }
+    ],
+    "requires": {
+      "node": "16.18.1",
+      "tools": ["PHP 8.3 or newer with Composer, or DDEV"]
+    },
+    "maintained": "2026-11-15",
+    "default": true,
+    "steps": ["npm run setup", "npm run dev"],
+    "install": {
+      "runs": ["npm run setup"],
+      "notes": [
+        "npm install ran the setup. If it said it could not, run npm run setup once what it named is in place.",
+        "npm run dev starts the backend again when it is not running."
+      ]
+    }
+  }
+}

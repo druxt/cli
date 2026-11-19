@@ -6,6 +6,10 @@ export default defineConfig({
     // create-druxt imports the CLI by its package name. The tests read the
     // CLI's sources, so they do not depend on a build having run.
     alias: {
+      // The longer name first: an alias matches by prefix.
+      '@druxt/cli/launch': fileURLToPath(
+        new URL('./packages/cli/src/launch.ts', import.meta.url)
+      ),
       '@druxt/cli': fileURLToPath(
         new URL('./packages/cli/src/index.ts', import.meta.url)
       ),
@@ -19,6 +23,14 @@ export default defineConfig({
       provider: 'v8',
       include: ['packages/*/src/**/*.ts', 'scripts/lint-private-refs.mjs'],
       reporter: ['text', 'lcov'],
+      // A floor measured from the tests as they are, not a target. Raise it
+      // when coverage improves, and never lower it to make a change pass.
+      thresholds: {
+        statements: 94,
+        branches: 87,
+        functions: 95,
+        lines: 94,
+      },
     },
   },
 })
