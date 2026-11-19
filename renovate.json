@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "baseBranches": ["0.x"],
+  "automerge": false,
+  "rangeStrategy": "bump",
+  "dependencyDashboard": true,
+  "branchPrefix": "deps/",
+  "labels": ["dependencies"],
+  "enabledManagers": ["github-actions", "npm"],
+  "packageRules": [
+    {
+      "description": "Pin GitHub Actions to commit SHAs. A tag is a mutable reference to code that runs with repository credentials. npm packages already carry integrity hashes in the lockfile.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "description": "Held on purpose. c12 4 is a release candidate, and typescript-eslint does not support TypeScript 7 yet. Bump each by hand when that changes.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["c12", "typescript"],
+      "enabled": false
+    },
+    {
+      "description": "Majors need a person. An automated major lands a breaking change on a branch nobody chose to upgrade.",
+      "matchManagers": ["npm", "github-actions"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    },
+    {
+      "description": "One pull request for everything else. Ungrouped updates produce a pull request per dependency and the whole set gets ignored together.",
+      "matchPackageNames": ["*"],
+      "groupName": "all dependencies",
+      "groupSlug": "all"
+    }
+  ]
+}
