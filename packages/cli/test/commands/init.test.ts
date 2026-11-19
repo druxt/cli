@@ -381,16 +381,9 @@ describe('drx init --registry', () => {
   })
 
   test('uses the default registry when it answers', async () => {
-    // A bundled copy at the same revision as the one served.
-    const bundled = tmp('drx-bundled-')
-    writeTree(bundled, {
-      'index.json': { starters: ['quickstart'] },
-      'quickstart.json': registry.entry,
-    })
     const result = await run(['init', 'site', '--yes', '--json'], {
       cwd,
       defaultRegistry: registry.url,
-      bundledRegistryDir: bundled,
     })
     expect(result.code).toBe(0)
     expect(JSON.parse(result.stdout).registry).toEqual({

@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 import { runCli } from '../../src/cli.js'
 import type { CliContext } from '../../src/context.js'
@@ -27,6 +28,11 @@ export async function run(
     stderr: { write: (chunk) => (stderr += chunk) },
     interactive: false,
     nodeVersion: '24.18.0',
+    // A test that serves its own default registry is about that registry. With
+    // no bundled copy to compare revisions with, the one served is read.
+    ...(overrides.defaultRegistry && !overrides.bundledRegistryDir
+      ? { bundledRegistryDir: join(tmp(), 'no-bundled-copy') }
+      : {}),
     ...overrides,
   })
   return {
