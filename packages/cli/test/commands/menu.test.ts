@@ -157,8 +157,8 @@ describe('bare drx in a terminal, inside a project', () => {
     expect(result.asked[0]?.choices).toEqual([
       { value: 'list', label: 'List the modules' },
       { value: 'search', label: 'Search the modules' },
-      { value: 'show', label: 'Show a module' },
-      { value: 'info', label: 'Show this project' },
+      { value: 'show', label: "View a module's details" },
+      { value: 'info', label: "View this project's details" },
       { value: 'add', label: 'Add a module' },
       { value: 'remove', label: 'Remove a module' },
       { value: 'configure', label: 'Configure a module', ...unavailable },
