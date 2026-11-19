@@ -83,6 +83,7 @@ function answering(answers: Record<string, unknown>) {
   }
   const prompter: Prompter = {
     search: async ({ message, choices }) => answer(message, choices) as never,
+    pickMany: async ({ message, choices }) => answer(message, choices) as never,
     text: async ({ message }) => answer(message) as string,
     select: async ({ message, choices }) => answer(message, choices) as never,
     confirm: async ({ message }) => answer(message) as boolean,
@@ -437,6 +438,70 @@ describe('drx init --engine --force, into a directory that holds files', () => {
     expect(JSON.parse(result.stdout).removed).toEqual([])
     expect(has('drupal/.lando.yml')).toBe(true)
     expect(has('drupal/.ddev/config.yaml')).toBe(true)
+  })
+
+  const RECORD = {
+    name: 'breadcrumb',
+    package: 'druxt-breadcrumb',
+    frontend: [{ path: 'nuxt', installed: true, listed: true }],
+    backend: [
+      {
+        path: 'drupal',
+        modules: [
+          {
+            name: 'decoupled_router',
+            package: 'drupal/decoupled_router',
+            enabled: true,
+            required: true,
+          },
+        ],
+        patches: [],
+      },
+    ],
+  }
+  const existing = (extra: Record<string, unknown>) => ({
+    layout: 'monorepo',
+    line: '0.x',
+    starter: 'quickstart',
+    source: 'npm',
+    parts: [
+      { role: 'frontend', kind: 'nuxt', path: 'nuxt' },
+      { role: 'backend', kind: 'drupal', path: 'drupal', engine: 'lando' },
+    ],
+    ...extra,
+  })
+
+  test('keeps the record of the modules drx add put in the project', async () => {
+    writeTree(cwd, {
+      'site/drx.config.json': existing({ modules: [RECORD] }),
+    })
+    const result = await init(['--yes', '--engine', 'ddev', '--force'])
+    expect(result.code).toBe(0)
+    expect(config().modules).toEqual([RECORD])
+    // The rest of the file is what this run settled.
+    expect(backend().engine).toBe('ddev')
+    expect(result.stderr).toContain(
+      'Kept the record of the 1 module drx add put in this project.'
+    )
+  })
+
+  test('writes no record where the project had none', async () => {
+    writeTree(cwd, { 'site/drx.config.json': existing({}) })
+    const result = await init(['--yes', '--engine', 'ddev', '--force'])
+    expect(result.code).toBe(0)
+    expect(config().modules).toBeUndefined()
+    expect(result.stderr).not.toContain('Kept the record')
+  })
+
+  test('says so when the file that was there cannot be read', async () => {
+    writeTree(cwd, { 'site/drx.config.json': '{ not json' })
+    const result = await init(['--yes', '--engine', 'ddev', '--force'])
+    expect(result.code).toBe(0)
+    expect(config().modules).toBeUndefined()
+    expect(result.stderr).toContain('Warning: The drx.config.json that was in')
+    expect(result.stderr).toContain(
+      'could not be read, so no record of added modules was kept from it.'
+    )
   })
 
   test('still removes them from a directory that exists and is empty', async () => {

@@ -55,6 +55,7 @@ function scripted(answers: unknown[]) {
   }
   const prompter: Prompter = {
     search: async ({ message }) => next(message) as never,
+    pickMany: async ({ message }) => next(message) as never,
     text: async ({ message }) => next(message) as string,
     select: async ({ message }) => next(message) as never,
     confirm: async ({ message }) => next(message) as boolean,

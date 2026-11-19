@@ -31,6 +31,8 @@ export function answering(
       text: async ({ message }) => answer(message) as string,
       select: async ({ message, choices }) => answer(message, choices) as never,
       search: async ({ message, choices }) => answer(message, choices) as never,
+      pickMany: async ({ message, choices }) =>
+        answer(message, choices) as never,
       confirm: async ({ message }) => answer(message) as boolean,
     },
   }

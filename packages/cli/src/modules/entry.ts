@@ -1,6 +1,11 @@
 import { adapterFor, kindsWithRole } from '../adapters/index.js'
 import { DrxError } from '../errors.js'
-import { isNonEmptyString, isNpmName, isRecord } from '../validate.js'
+import {
+  isHttpUrl,
+  isNonEmptyString,
+  isNpmName,
+  isRecord,
+} from '../validate.js'
 
 /** The registry format this version reads. */
 export const MODULE_SCHEMA_VERSION = 1
@@ -17,6 +22,28 @@ export interface BackendModule {
    */
   core?: boolean
   url?: string
+  /** The package that provides the module, where its name does not say. */
+  composer?: { package: string; constraint?: string }
+  /** What is left to do by hand once the module is enabled. */
+  setup?: SetupStep[]
+  /** Patches the module needs until a fix is released. */
+  patches?: ModulePatch[]
+}
+
+export interface SetupStep {
+  title: string
+  command?: string
+  url?: string
+}
+
+export interface ModulePatch {
+  description: string
+  url: string
+  /** The package the patch applies to, when it is not the module's own. */
+  package?: string
+  issue?: string
+  /** The version of the patched package that holds the fix. */
+  until?: string
 }
 
 /**
@@ -71,6 +98,70 @@ function optionalBoolean(raw: Raw, key: string, at: string): boolean {
   return value ?? false
 }
 
+/** A value with its undefined keys left out. */
+function compact<T extends object>(value: T): T {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, inner]) => inner !== undefined)
+  ) as T
+}
+
+function listOf(
+  raw: Raw,
+  key: string,
+  at: string
+): [Raw, string][] | undefined {
+  const list = raw[key]
+  if (list === undefined) return undefined
+  if (!Array.isArray(list)) throw new Invalid(`${at}.${key} must be an array`)
+  return list.map((item, index) => {
+    const here = `${at}.${key}[${index}]`
+    if (!isRecord(item)) throw new Invalid(`${here} must be an object`)
+    return [item, here]
+  })
+}
+
+/** The optional fields that say how a backend module is added. */
+function additions(item: Raw, at: string) {
+  let composer: BackendModule['composer']
+  if (item.composer !== undefined) {
+    if (!isRecord(item.composer)) {
+      throw new Invalid(`${at}.composer must be an object`)
+    }
+    composer = compact({
+      package: requiredString(item.composer, 'package', `${at}.composer`),
+      constraint: optionalString(item.composer, 'constraint', `${at}.composer`),
+    }) as NonNullable<BackendModule['composer']>
+  }
+
+  const setup = listOf(item, 'setup', at)?.map(
+    ([step, here]) =>
+      compact({
+        title: requiredString(step, 'title', here),
+        command: optionalString(step, 'command', here),
+        url: optionalString(step, 'url', here),
+      }) as SetupStep
+  )
+
+  const patches = listOf(item, 'patches', at)?.map(([patch, here]) => {
+    const description = requiredString(patch, 'description', here)
+    if (!isHttpUrl(patch.url)) {
+      throw new Invalid(`${here}.url must be an http or https URL`)
+    }
+    return compact({
+      description,
+      url: patch.url,
+      package: optionalString(patch, 'package', here),
+      issue: optionalString(patch, 'issue', here),
+      until: optionalString(patch, 'until', here),
+    }) as ModulePatch
+  })
+
+  return compact({ composer, setup, patches }) as Pick<
+    BackendModule,
+    'composer' | 'setup' | 'patches'
+  >
+}
+
 /**
  * The backend modules of an entry. The registry lists them under a key named
  * after the kind of backend, so each backend kind that has an adapter is
@@ -95,6 +186,7 @@ function backendModules(raw: Raw, at: string): BackendModule[] {
         label: requiredString(item, 'label', here),
         ...(item.core === undefined ? {} : { core }),
         ...(url === undefined ? {} : { url }),
+        ...additions(item, here),
       }
       // The kind says what its tools take, so a value is never an option.
       const problem = adapterFor(kind)?.moduleProblem?.(module)

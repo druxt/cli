@@ -1,7 +1,7 @@
 {
   "name": "@druxt/cli",
   "version": "0.0.0",
-  "description": "The Druxt command-line tool: create a site from a starter and report on it.",
+  "description": "Command-line tool for Druxt: create a site, add modules and manage a decoupled Drupal project.",
   "keywords": [
     "druxt",
     "cli"
@@ -46,6 +46,7 @@
     "c12": "^3.3.4",
     "citty": "^0.2.2",
     "giget": "^3.3.1",
+    "magicast": "^0.5.5",
     "semver": "^7.8.6"
   }
 }

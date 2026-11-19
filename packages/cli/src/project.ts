@@ -3,10 +3,12 @@ import { writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { loadConfig } from 'c12'
+import type { BackendRecord, PackageRecord } from './adapters/adapter.js'
+import { adapterFor } from './adapters/index.js'
 import { DrxError } from './errors.js'
 import { isLayout, LAYOUTS, type Layout } from './layouts.js'
 import { partsProblem, type Part } from './parts.js'
-import { isNonEmptyString } from './validate.js'
+import { isNonEmptyString, isNpmName, isRecord } from './validate.js'
 
 const nodeRequire = createRequire(import.meta.url)
 
@@ -27,6 +29,77 @@ export interface ProjectConfig {
   /** The name of the source its Druxt packages come from. */
   source: string
   parts: Part[]
+  /** What `drx add` did, so `drx remove` undoes that and no more. */
+  modules?: ModuleRecord[]
+}
+
+/**
+ * One module the CLI added to the project, with what it did to each part.
+ * What it found in place is recorded as not done, so a remove leaves it.
+ */
+export interface ModuleRecord {
+  /** The name of the module in the registry. */
+  name: string
+  /** Its frontend package. */
+  package: string
+  /**
+   * What was done to each frontend part, by the part's path. Undefined in a
+   * record written before this was kept, which does not say.
+   */
+  frontend?: ({ path: string } & PackageRecord)[]
+  /** What was done to each backend part, by the part's path. */
+  backend: ({ path: string } & BackendRecord)[]
+}
+
+type Raw = Record<string, unknown>
+const rawList = (value: unknown): Raw[] =>
+  Array.isArray(value) ? value.filter(isRecord) : []
+
+/**
+ * A record as this version keeps it, read from any version's. An older one
+ * lists only the backend modules it required, all of which it also enabled,
+ * and has nothing on the frontend or on which module a patch was for.
+ */
+function moduleRecord(raw: Raw): ModuleRecord {
+  return {
+    name: raw.name as string,
+    package: raw.package as string,
+    ...(Array.isArray(raw.frontend)
+      ? {
+          frontend: rawList(raw.frontend).map((entry) => ({
+            path: String(entry.path),
+            installed: entry.installed === true,
+            listed: entry.listed === true,
+            ...(entry.byHand === true ? { byHand: true } : {}),
+          })),
+        }
+      : {}),
+    backend: rawList(raw.backend).map((entry) => ({
+      path: String(entry.path),
+      modules: rawList(entry.modules).map((module) => ({
+        name: String(module.name),
+        ...(typeof module.package === 'string'
+          ? { package: module.package }
+          : {}),
+        enabled: module.enabled !== false,
+        required: module.required !== false,
+      })),
+      patches: rawList(entry.patches).map((patch) => ({
+        package: String(patch.package),
+        description: String(patch.description),
+        url: String(patch.url),
+        ...(typeof patch.module === 'string' ? { module: patch.module } : {}),
+      })),
+      ...(isRecord(entry.patcher)
+        ? {
+            patcher: {
+              required: entry.patcher.required === true,
+              allowed: entry.patcher.allowed === true,
+            },
+          }
+        : {}),
+    })),
+  }
 }
 
 export async function writeProjectConfig(
@@ -58,7 +131,43 @@ function configProblem(config: Record<string, unknown>): string | undefined {
       return `${key} must be a non-empty string`
     }
   }
-  return partsProblem(config.parts, 'parts')
+  const parts = partsProblem(config.parts, 'parts')
+  if (parts) return parts
+
+  const modules = config.modules
+  if (modules === undefined) return undefined
+  if (!Array.isArray(modules)) return 'modules must be an array'
+  for (const [index, module] of modules.entries()) {
+    const at = `modules[${index}]`
+    for (const key of ['name', 'package']) {
+      if (!isRecord(module) || !isNonEmptyString(module[key])) {
+        return `${at}.${key} must be a non-empty string`
+      }
+    }
+    if (!Array.isArray((module as Record<string, unknown>).backend)) {
+      return `${at}.backend must be an array`
+    }
+    // The file comes with a clone of the project, and a remove hands what
+    // the record names to the tools of each part. So every name in it is
+    // checked here, as the same name is when it is read from a registry.
+    const record = moduleRecord(module as Raw)
+    if (!isNpmName(record.package)) {
+      return `${at}.package must be the name of an npm package`
+    }
+    for (const [position, entry] of record.backend.entries()) {
+      // A record for a path no part is at is never acted on.
+      const part = (config.parts as Part[]).find(
+        (candidate) => candidate.path === entry.path
+      )
+      const problem = part
+        ? adapterFor(part.kind)?.recordProblem?.(entry)
+        : undefined
+      if (problem) {
+        return `${at}.backend[${position}].${problem.field} ${problem.must}`
+      }
+    }
+  }
+  return undefined
 }
 
 /** Reads and checks the config file of the project rooted at `root`. */
@@ -98,5 +207,8 @@ export async function loadProjectConfig(root: string): Promise<ProjectConfig> {
     starter: config.starter as string,
     source: config.source as string,
     parts: config.parts as Part[],
+    ...(config.modules
+      ? { modules: (config.modules as Raw[]).map(moduleRecord) }
+      : {}),
   }
 }

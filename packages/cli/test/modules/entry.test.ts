@@ -5,6 +5,9 @@ import { moduleRegistry, moduleRegistryWith } from '../helpers/modules.js'
 
 const AT = 'https://example.com/modules.json'
 const NPM_NAME = 'modules[1].npm must be the name of an npm package'
+const PACKAGE =
+  'package must be the name of a Composer package, as in vendor/name'
+const CONSTRAINT = 'constraint must be a Composer version constraint'
 const MODULE_NAME =
   'modules[1].drupal[0].name must be a machine name: lower-case letters, digits and underscores, starting with a letter'
 
@@ -181,5 +184,248 @@ describe('parseModuleRegistry', () => {
     expect(() => parseModuleRegistry(registry, AT)).toThrow(
       `The module registry at ${AT} is invalid: ${message}.`
     )
+  })
+
+  test('reads what a backend module needs done to add it', () => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [
+        {
+          name: 'jsonapi_menu',
+          label: 'Menu items',
+          composer: {
+            package: 'drupal/jsonapi_menu_items',
+            constraint: '^1.2',
+          },
+          setup: [
+            {
+              title: 'Create a consumer',
+              command: 'drush x',
+              url: 'https://example.com/doc',
+            },
+            { title: 'Save the keys' },
+          ],
+          patches: [
+            {
+              description: 'Fix a crash',
+              url: 'https://example.com/1.diff',
+              package: 'drupal/core',
+              issue: 'https://example.com/issue/1',
+              until: '11.3.0',
+            },
+            { description: 'Another', url: 'https://example.com/2.diff' },
+          ],
+        },
+      ]
+    })
+    expect(parseModuleRegistry(registry, AT)[1]?.backend).toEqual([
+      {
+        kind: 'drupal',
+        name: 'jsonapi_menu',
+        label: 'Menu items',
+        composer: { package: 'drupal/jsonapi_menu_items', constraint: '^1.2' },
+        setup: [
+          {
+            title: 'Create a consumer',
+            command: 'drush x',
+            url: 'https://example.com/doc',
+          },
+          { title: 'Save the keys' },
+        ],
+        patches: [
+          {
+            description: 'Fix a crash',
+            url: 'https://example.com/1.diff',
+            package: 'drupal/core',
+            issue: 'https://example.com/issue/1',
+            until: '11.3.0',
+          },
+          { description: 'Another', url: 'https://example.com/2.diff' },
+        ],
+      },
+    ])
+  })
+
+  test.each([
+    [{ composer: 'drupal/x' }, 'composer must be an object'],
+    [{ composer: {} }, 'composer.package must be a non-empty string'],
+    [
+      { composer: { package: 'drupal/x', constraint: 1 } },
+      'composer.constraint must be a string',
+    ],
+    [{ setup: 'x' }, 'setup must be an array'],
+    [{ setup: [{}] }, 'setup[0].title must be a non-empty string'],
+    [
+      { setup: [{ title: 'x', command: 1 }] },
+      'setup[0].command must be a string',
+    ],
+    [{ patches: {} }, 'patches must be an array'],
+    [
+      { patches: [{ url: 'https://example.com/a.diff' }] },
+      'patches[0].description must be a non-empty string',
+    ],
+    [
+      { patches: [{ description: 'x', url: 'ftp://example.com/a.diff' }] },
+      'patches[0].url must be an http or https URL',
+    ],
+    [
+      {
+        patches: [
+          { description: 'x', url: 'https://example.com/a.diff', until: 1 },
+        ],
+      },
+      'patches[0].until must be a string',
+    ],
+    [{ composer: { package: '--working-dir=/tmp' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'decoupled_router' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'Drupal/Token' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'drupal/a b' } }, `composer.${PACKAGE}`],
+    [{ composer: { package: 'drupal/x:^1 | calc' } }, `composer.${PACKAGE}`],
+    [
+      { composer: { package: 'drupal/x', constraint: '--no-plugins' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      { composer: { package: 'drupal/x', constraint: '^1 & calc' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      { composer: { package: 'drupal/x', constraint: '"^1"' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    [
+      { composer: { package: 'drupal/x', constraint: '' } },
+      `composer.${CONSTRAINT}`,
+    ],
+    ...[
+      '^3.26 --no-plugins',
+      '^1.0 -W',
+      '^1.0 -',
+      '- 1.0',
+      '1.0 -2.0',
+      '1.0 - -2.0',
+      '^1.0 - 2.0',
+      '^1.0 nonsense',
+      'nonsense',
+      '^',
+      '>=',
+      '>= <2',
+      '^1.0 ||',
+      '|| ^1.0',
+      '^1.0 ||| ^2.0',
+      '^1.0,,^2.0',
+      ',^1.0',
+      '^^1.0',
+      '1..0',
+      '^1.0 as',
+      'as 1.0',
+      '^1.0@nightly',
+      'dev-',
+      '1.0/2.0',
+    ].map((constraint): [Record<string, unknown>, string] => [
+      { composer: { package: 'drupal/x', constraint } },
+      `composer.${CONSTRAINT}`,
+    ]),
+    [
+      {
+        patches: [
+          {
+            description: 'x',
+            url: 'https://example.com/a.diff',
+            package: '-d',
+          },
+        ],
+      },
+      `patches[0].${PACKAGE}`,
+    ],
+  ])('names the bad field of a backend module in %j', (extra, message) => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [{ name: 'block', label: 'Block', ...extra }]
+    })
+    expect(() => parseModuleRegistry(registry, AT)).toThrow(
+      `The module registry at ${AT} is invalid: modules[1].drupal[0].${message}.`
+    )
+  })
+
+  test.each([
+    '^1.2',
+    '~2.0@beta',
+    '>=1.0 <2.0 || ^3',
+    '1.0 - 2.0',
+    'dev-main',
+    '1.x-dev#abc123',
+    'dev-feature/thing as 1.0.0',
+    '*',
+    '!=1.3.0, >=1.2',
+    '^3.26 || ^4.0',
+    '^3.26||^4.0',
+    '^1 | ^2',
+    '>=1.0 <2.0',
+    '>=1.0,<2.0',
+    '>= 1.0',
+    '1.0.0-beta1',
+    '^2.0@beta',
+    '~1.2.3@RC',
+    '2.x-dev',
+    '1.2.*',
+    'v1.2.3',
+    '1.0.0+build.5',
+    '1.0.x-dev as 1.0.0',
+    'dev-main#a1b2c3',
+    '@dev',
+    '<>1.4',
+    '==1.2.3',
+  ])('takes %j as a constraint', (constraint) => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [
+        {
+          name: 'block',
+          label: 'Block',
+          composer: { package: 'drupal/jsonapi_menu_items', constraint },
+        },
+      ]
+    })
+    expect(
+      parseModuleRegistry(registry, AT)[1]?.backend[0]?.composer?.constraint
+    ).toBe(constraint)
+  })
+
+  test.each(['drupal/core', 'cweagans/composer-patches', 'a/b', 'my.org/a--b'])(
+    'takes %j as a package',
+    (name) => {
+      const registry = moduleRegistryWith(1, (module) => {
+        module.drupal = [
+          {
+            name: 'block',
+            label: 'Block',
+            composer: { package: name },
+            patches: [
+              {
+                description: 'x',
+                url: 'https://example.com/a.diff',
+                package: name,
+              },
+            ],
+          },
+        ]
+      })
+      expect(
+        parseModuleRegistry(registry, AT)[1]?.backend[0]?.composer?.package
+      ).toBe(name)
+    }
+  )
+
+  test('checks a long name in no more time than a short one', () => {
+    const registry = moduleRegistryWith(1, (module) => {
+      module.drupal = [
+        {
+          name: 'block',
+          label: 'Block',
+          composer: { package: `a/${'a-'.repeat(50_000)}!` },
+        },
+      ]
+    })
+    const started = performance.now()
+    expect(() => parseModuleRegistry(registry, AT)).toThrow(PACKAGE)
+    expect(performance.now() - started).toBeLessThan(200)
   })
 })

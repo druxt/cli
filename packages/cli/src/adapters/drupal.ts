@@ -1,11 +1,8 @@
 import { join } from 'node:path'
 import { isRecord } from '../validate.js'
-import {
-  addModuleNotAvailable,
-  type KindAdapter,
-  type PackageVersion,
-} from './adapter.js'
-import { moduleProblem } from './drupal-fields.js'
+import type { KindAdapter, PackageVersion } from './adapter.js'
+import { moduleProblem, recordProblem } from './drupal-fields.js'
+import { planBackendAdd, planBackendRemove } from './drupal-modules.js'
 import { readJsonObject, stringMap } from './read-json.js'
 
 /** Any of these in `require` makes a Composer project a Drupal site. */
@@ -46,6 +43,7 @@ export const drupalAdapter: KindAdapter = {
   },
 
   moduleProblem,
+  recordProblem,
 
   async packages(dir) {
     const requires = await required(dir)
@@ -63,5 +61,6 @@ export const drupalAdapter: KindAdapter = {
   druxt: async () => undefined,
   package: async () => undefined,
 
-  addModule: addModuleNotAvailable,
+  addModule: planBackendAdd,
+  removeModule: planBackendRemove,
 }

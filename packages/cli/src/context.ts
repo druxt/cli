@@ -2,6 +2,7 @@ import { downloadTemplate } from 'giget'
 import { findOnPath } from './commands-on-path.js'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { runTool, type RunTool } from './exec.js'
 import { installDependencies } from './install.js'
 import { DEFAULT_MODULE_REGISTRY } from './modules/registry.js'
 import { bundledRegistryDir } from './package-root.js'
@@ -37,6 +38,11 @@ export interface Prompter {
     message: string
     choices: Choice<T>[]
   }): Promise<T>
+  /** A list to narrow by typing, of which any number can be picked. */
+  pickMany<T extends string>(question: {
+    message: string
+    choices: Choice<T>[]
+  }): Promise<T[]>
   confirm(question: { message: string; initial: boolean }): Promise<boolean>
 }
 
@@ -80,6 +86,8 @@ export interface CliContext {
   download: typeof downloadTemplate
   /** Installs the dependencies of the site in a directory. */
   install: (dir: string) => Promise<void>
+  /** Runs a tool of the project, such as its package manager. */
+  exec: RunTool
   /** The file a command name resolves to on PATH, or undefined. */
   findCommand: (name: string) => string | undefined
   /**
@@ -119,6 +127,7 @@ export function defaultContext(): CliContext {
     cacheDir: cacheDirectory(process.env),
     download: downloadTemplate,
     install: (dir) => installDependencies(dir),
+    exec: runTool,
     findCommand: (name) => findOnPath(name),
   }
 }

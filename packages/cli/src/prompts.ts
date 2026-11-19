@@ -1,5 +1,12 @@
 import type { Readable, Writable } from 'node:stream'
-import { autocomplete, confirm, isCancel, select, text } from '@clack/prompts'
+import {
+  autocomplete,
+  autocompleteMultiselect,
+  confirm,
+  isCancel,
+  select,
+  text,
+} from '@clack/prompts'
 import type { Choice, Prompter } from './context.js'
 import { DrxError } from './errors.js'
 
@@ -60,6 +67,18 @@ export function terminalPrompter(
         output,
       })
       return answered<string>(value) as (typeof choices)[number]['value']
+    },
+
+    pickMany: async ({ message, choices }) => {
+      const values = await autocompleteMultiselect<string>({
+        message,
+        options: clackOptions(choices),
+        maxItems: 10,
+        required: true,
+        input,
+        output,
+      })
+      return answered<string[]>(values) as (typeof choices)[number]['value'][]
     },
 
     confirm: async ({ message, initial }) =>

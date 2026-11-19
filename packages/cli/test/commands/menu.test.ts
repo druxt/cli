@@ -159,8 +159,8 @@ describe('bare drx in a terminal, inside a project', () => {
       { value: 'search', label: 'Search the modules' },
       { value: 'show', label: "View a module's details" },
       { value: 'info', label: "View this project's details" },
-      { value: 'add', label: 'Add a module', ...unavailable },
-      { value: 'remove', label: 'Remove a module', ...unavailable },
+      { value: 'add', label: 'Add a module' },
+      { value: 'remove', label: 'Remove a module' },
       { value: 'configure', label: 'Configure a module', ...unavailable },
       { value: 'patches', label: 'Manage patches', ...unavailable },
       { value: 'quit', label: 'Quit' },
@@ -211,7 +211,42 @@ describe('bare drx in a terminal, inside a project', () => {
     expect(menu.stderr).toContain('Repeat this with: drx info')
   })
 
-  test.each(['add', 'remove', 'configure', 'patches'])(
+  test('adds the modules picked from a list, as drx add does', async () => {
+    const cwd = project()
+    writeTree(cwd, {
+      'nuxt/nuxt.config.js': 'export default { modules: [] }\n',
+    })
+    const calls: string[] = []
+    const result = await terminal(
+      [],
+      {
+        [MENU]: 'add',
+        'Which modules?': ['blocks'],
+        'Make these changes?': true,
+      },
+      {
+        cwd,
+        exec: async (command, args) => {
+          calls.push([command, ...args].join(' '))
+          return { code: 0, output: '' }
+        },
+      }
+    )
+    expect(result.code).toBe(0)
+    expect(calls[0]).toBe('npm install -- druxt-blocks')
+    expect(result.stdout).toContain('Added blocks.')
+    expect(result.stderr).toContain('Repeat this with: drx add blocks --yes')
+  })
+
+  test('offers to remove only what the project has', async () => {
+    const result = await terminal([], { [MENU]: 'remove' }, { cwd: project() })
+    expect(result.code).toBe(1)
+    expect(result.stderr).toContain(
+      'There is no module to remove in this project.'
+    )
+  })
+
+  test.each(['configure', 'patches'])(
     'says %s is not available yet if it is chosen all the same',
     async (choice) => {
       const result = await terminal([], { [MENU]: choice }, { cwd: project() })
@@ -323,8 +358,10 @@ describe('--json in a terminal, with the banner settings at their defaults', () 
     [['module', 'search', 'block', '--json']],
     [['module', 'info', 'blocks', '--json']],
     [['module', 'info', 'nothing-like-it', '--json']],
-    [['module', 'add', 'blocks', '--json']],
-    [['module', 'remove', 'blocks', '--json']],
+    [['add', 'blocks', '--dry-run', '--json']],
+    [['module', 'add', 'blocks', '--dry-run', '--json']],
+    [['remove', 'blocks', '--dry-run', '--json']],
+    [['add', '--json']],
     [['module', 'configure', 'blocks', '--json']],
     [['module', '--json']],
     [['init', 'site', '--yes', '--json']],

@@ -6,6 +6,7 @@ import {
   type ArgsDef,
   type CommandDef,
 } from 'citty'
+import { addCommand, removeCommand } from './commands/change.js'
 import { infoCommand } from './commands/info.js'
 import { initCommand } from './commands/init.js'
 import { runMenu } from './commands/menu.js'
@@ -35,7 +36,12 @@ export function mainCommand(context: CliContext): CommandDef {
     subCommands: {
       init: initCommand(context),
       info: infoCommand(context),
-      module: moduleCommand(context),
+      add: addCommand(context),
+      remove: removeCommand(context),
+      module: moduleCommand(context, {
+        add: addCommand(context, 'module add'),
+        remove: removeCommand(context, 'module remove'),
+      }),
     },
   })
 }
@@ -178,9 +184,13 @@ export function optionsAfterCommand(
 }
 
 /** The code and message to report for anything a command throws. */
-function describe(error: unknown): { code: string; message: string } {
+function describe(error: unknown): {
+  code: string
+  message: string
+  [detail: string]: unknown
+} {
   if (error instanceof DrxError) {
-    return { code: error.code, message: error.message }
+    return { ...error.details, code: error.code, message: error.message }
   }
   // citty's own error for a bad argument or command. The class is not
   // exported, so it is recognised by name.

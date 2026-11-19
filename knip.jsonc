@@ -1,5 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Copies of real files from other projects, with those projects' imports.
+  "ignore": ["packages/cli/test/fixtures/**"],
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs", "test/**/*.test.ts"],
