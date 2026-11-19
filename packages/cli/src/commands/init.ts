@@ -346,8 +346,11 @@ async function runInit(
   // A step the install ran is not left to run: running a setup twice can
   // undo the first.
   const ran = install ? entry.druxt.install : undefined
+  const shown = inside && !isAbsolute(fromCwd) ? fromCwd : target
   const next = [
-    `cd ${shellQuote(inside && !isAbsolute(fromCwd) ? fromCwd : target)}`,
+    // A name that starts with a hyphen is written as a path: a shell reads
+    // "cd -" as the previous directory, and "cd -x" as an option.
+    `cd ${shellQuote(shown.startsWith('-') ? `./${shown}` : shown)}`,
     ...(entry.druxt.steps ?? []).filter((step) => !ran?.runs?.includes(step)),
   ]
   const notes = ran?.notes ?? []
