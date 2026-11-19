@@ -40,12 +40,14 @@ if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
 fi
 
 # Tool names that must not appear as an author, co-author or generator.
-tools='claude|anthropic|copilot|chatgpt|openai|gemini|codex|cursor|aider|devin|windsurf|opencode|glm|\bamp\b'
+# Each is matched as a whole word, so a name inside another word, such as the
+# one in "precursor", credits no tool.
+tools='claude|anthropic|copilot|chatgpt|openai|gemini|codex|cursor|aider|devin|windsurf|opencode|glm|amp'
 
 # Each alternative in pieces: the trailer keys, the footer, the session link
 # and the noreply address are the shapes seen in practice.
-trailer='(co-authored|assisted)'"-by:.*(${tools})"
-footer="generated (with|by).*(${tools}|\\bai\\b)"
+trailer='(co-authored|assisted)'"-by:.*\\b(${tools})\\b"
+footer="generated (with|by).*\\b(${tools}|ai)\\b"
 session='claude-'"session:|claude\\.ai/code/session"
 address='noreply'"@anthropic\\.com"
 pattern="(${trailer})|(${footer})|(${session})|(${address})"
@@ -92,7 +94,12 @@ if [ "$files_only" -eq 0 ]; then
   for sha in $shas; do
     commits_checked=$((commits_checked + 1))
     short="$(git rev-parse --short "$sha")"
-    hits="$(git log -1 --format=%B "$sha" | grep -iE "$pattern")"
+    # Read first, then search. In one pipeline, grep's "no match" would be the
+    # status of a git log that could not read the message.
+    message="$(git log -1 --format=%B "$sha")"
+    rc=$?
+    [ "$rc" -ne 0 ] && scan_failed "commit ${short}" "$rc"
+    hits="$(printf '%s\n' "$message" | grep -iE "$pattern")"
     rc=$?
     [ "$rc" -gt 1 ] && scan_failed "commit ${short}" "$rc"
     while IFS= read -r line; do
@@ -155,9 +162,14 @@ files_checked="$(git ls-files | wc -l | tr -d ' ')"
 hits="$(git grep -nIiE "$pattern" -- .)"
 rc=$?
 [ "$rc" -gt 1 ] && scan_failed "the tracked files" "$rc"
+# The index too. Before a commit, a staged line that the working copy no longer
+# has is still what the commit records. In a pipeline the two are the same.
+staged="$(git grep --cached -nIiE "$pattern" -- .)"
+rc=$?
+[ "$rc" -gt 1 ] && scan_failed "the staged files" "$rc"
 while IFS= read -r line; do
   [ -n "$line" ] && report "$line"
-done <<< "$hits"
+done <<< "$(printf '%s\n%s\n' "$hits" "$staged" | sort -u)"
 
 # --- verdict -----------------------------------------------------------------
 
