@@ -20,15 +20,13 @@ export function nodeTooOld(current: string): string | undefined {
     const b = need[index] || 0
     if (a > b) return undefined
     if (a < b) {
-      return [
+      return (
         'drx needs Node ' +
-          MINIMUM_NODE +
-          ' or later, and this is Node ' +
-          current +
-          '.',
-        "A site can pin an older Node for itself, and a version manager switches to it in the site's directory.",
-        'Run drx on a newer Node there, for example: mise exec node@24 -- drx <command>',
-      ].join('\n')
+        MINIMUM_NODE +
+        ' or later, and this is Node ' +
+        current +
+        '.'
+      )
     }
   }
   return undefined

@@ -6,6 +6,7 @@
     "noEmit": true,
     "allowJs": true,
     "paths": {
+      "@druxt/cli/launch": ["./packages/cli/src/launch.ts"],
       "@druxt/cli": ["./packages/cli/src/index.ts"]
     }
   },
