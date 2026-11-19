@@ -442,7 +442,7 @@ function infoCommand(context: CliContext) {
   return defineCommand({
     meta: {
       name: 'info',
-      description: 'Show one module: its package, range, needs and links',
+      description: 'Details of one module: its package, range, needs and links',
     },
     args,
     async run({ args: parsed, rawArgs }) {
@@ -548,7 +548,7 @@ export function moduleCommand(context: CliContext) {
   return defineCommand({
     meta: {
       name: 'module',
-      description: 'List, search and show the modules in the Druxt registry',
+      description: 'List, search and view the modules in the Druxt registry',
     },
     args: registryArgs,
     subCommands,

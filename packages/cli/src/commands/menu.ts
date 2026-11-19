@@ -16,8 +16,8 @@ const OUTSIDE: Choice<string>[] = [
 const INSIDE: Choice<string>[] = [
   { value: 'list', label: 'List the modules' },
   { value: 'search', label: 'Search the modules' },
-  { value: 'show', label: 'Show a module' },
-  { value: 'info', label: 'Show this project' },
+  { value: 'show', label: "View a module's details" },
+  { value: 'info', label: "View this project's details" },
   { value: 'add', label: 'Add a module', ...NOT_YET },
   { value: 'remove', label: 'Remove a module', ...NOT_YET },
   { value: 'configure', label: 'Configure a module', ...NOT_YET },

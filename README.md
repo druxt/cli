@@ -166,7 +166,7 @@ Usage for the CLI or one command, and the version.
 `drx` with no command opens a menu when a person is at the terminal. It names the project you are in, which it reads from `drx.config.json`. Below that are the actions for where you are:
 
 - Outside a project: create a site.
-- Inside one: list, search or show modules, and show the project. Adding, removing and configuring a module and managing patches are listed as not available yet.
+- Inside one: list, search or view modules, and view the project's details. Adding, removing and configuring a module and managing patches are listed as not available yet.
 
 Each entry runs the command it stands for, so the menu and the commands cannot differ.
 
