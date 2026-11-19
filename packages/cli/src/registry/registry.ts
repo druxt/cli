@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DrxError } from '../errors.js'
+import { fetchJson } from '../fetch-json.js'
 import { bundledRegistryDir } from '../package-root.js'
 import { isRecord, isStringArray } from '../validate.js'
 import { trimEndSlashes } from '../slashes.js'
@@ -13,8 +14,6 @@ import { validateEntry, type StarterEntry } from './entry.js'
  */
 export const DEFAULT_REGISTRY =
   'https://raw.githubusercontent.com/druxt/cli/0.x/starters'
-
-const TIMEOUT_MS = 10_000
 
 export interface Registry {
   /** `remote` for a URL, `bundled` for the copy inside the package. */
@@ -55,34 +54,7 @@ function remoteReader(
   fetcher: typeof fetch,
   auth?: string
 ): ReadJson {
-  return async (file) => {
-    const url = `${base}/${file}`
-    let response: Response
-    try {
-      response = await fetcher(url, {
-        headers: auth ? { authorization: `Bearer ${auth}` } : {},
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-      })
-    } catch (error) {
-      const cause = error instanceof Error ? (error.cause ?? error) : error
-      const detail = cause instanceof Error ? cause.message : String(cause)
-      throw new DrxError('registry', `Could not read ${url}: ${detail}.`)
-    }
-    if (!response.ok) {
-      throw new DrxError(
-        'registry',
-        `Could not read ${url}: ${response.status} ${response.statusText}.`
-      )
-    }
-    try {
-      return JSON.parse(await response.text()) as unknown
-    } catch {
-      throw new DrxError(
-        'registry',
-        `Could not read ${url}: it is not valid JSON.`
-      )
-    }
-  }
+  return (file) => fetchJson(`${base}/${file}`, fetcher, auth)
 }
 
 function bundledReader(dir: string): ReadJson {
@@ -99,6 +71,18 @@ function namesFrom(index: unknown, label: string): string[] {
     )
   }
   return starters
+}
+
+/**
+ * The revision an index states: a whole number that goes up whenever the
+ * entries gain something a version of drx depends on. An index without one is
+ * at revision 0.
+ */
+function revisionOf(index: unknown): number {
+  const revision = isRecord(index) ? index.revision : undefined
+  return typeof revision === 'number' && Number.isInteger(revision)
+    ? revision
+    : 0
 }
 
 function remoteRegistry(base: string, read: ReadJson): Registry {
@@ -154,16 +138,26 @@ export async function openRegistry(
   }
 
   const base = trimEndSlashes(options.defaultUrl ?? DEFAULT_REGISTRY)
-  const remote = remoteRegistry(base, remoteReader(base, fetcher))
+  const bundledDir = options.bundledDir ?? bundledRegistryDir()
+  const read = remoteReader(base, fetcher)
   try {
-    const names = await remote.names()
-    return { ...remote, names: async () => names }
+    const index = await read('index.json')
+    const names = namesFrom(index, `${base}/index.json`)
+    // A build made ahead of what is published, such as a branch that adds a
+    // field to the entries, has to read the entries it was built with.
+    const ours = await bundledReader(bundledDir)('index.json').catch(
+      () => undefined
+    )
+    if (revisionOf(index) < revisionOf(ours)) {
+      return bundledRegistry(
+        bundledDir,
+        `${base} is older than this version of drx.`
+      )
+    }
+    return { ...remoteRegistry(base, read), names: async () => names }
   } catch (error) {
     if (!(error instanceof DrxError)) throw error
-    return bundledRegistry(
-      options.bundledDir ?? bundledRegistryDir(),
-      error.message
-    )
+    return bundledRegistry(bundledDir, error.message)
   }
 }
 

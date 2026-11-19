@@ -12,7 +12,8 @@
     ],
     "requires": {
       "node": "16.18.1",
-      "tools": ["PHP 8.3 or newer with Composer, or DDEV"]
+      "tools": ["PHP 8.3 or newer with Composer, or DDEV"],
+      "commands": [["php", "composer"], ["ddev"]]
     },
     "maintained": "2026-11-15",
     "default": true,

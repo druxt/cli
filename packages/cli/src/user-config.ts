@@ -19,6 +19,8 @@ export interface UserConfig {
   /** The file the configuration was read from, or would be. */
   path: string
   registries: Record<string, string>
+  /** Module registries by name, for `--module-registry`. */
+  moduleRegistries: Record<string, string>
   sources: Record<string, SourceDefinition>
 }
 
@@ -35,11 +37,14 @@ export function userConfigPath(env: Env): string {
 function configProblem(config: unknown): string | undefined {
   if (!isRecord(config)) return 'it must hold an object'
 
-  const registries = config.registries ?? {}
-  if (!isRecord(registries)) return 'registries must be an object of URLs'
-  for (const [name, url] of Object.entries(registries)) {
-    if (!isHttpUrl(url))
-      return `registries.${name} must be an http or https URL`
+  for (const key of ['registries', 'moduleRegistries']) {
+    const registries = config[key] ?? {}
+    if (!isRecord(registries)) return `${key} must be an object of URLs`
+    for (const [name, url] of Object.entries(registries)) {
+      if (!isHttpUrl(url)) {
+        return `${key}.${name} must be an http or https URL`
+      }
+    }
   }
 
   const sources = config.sources ?? {}
@@ -78,7 +83,7 @@ export async function loadUserConfig(env: Env): Promise<UserConfig> {
         `DRX_CONFIG names ${path}, which does not exist.`
       )
     }
-    return { path, registries: {}, sources: {} }
+    return { path, registries: {}, moduleRegistries: {}, sources: {} }
   }
 
   const invalid = (problem: string) =>
@@ -97,22 +102,42 @@ export async function loadUserConfig(env: Env): Promise<UserConfig> {
   return {
     path,
     registries: config.registries ?? {},
+    moduleRegistries: config.moduleRegistries ?? {},
     sources: config.sources ?? {},
   }
 }
 
-/** Turns a `--registry` value into a URL: a URL, or a configured name. */
-export function resolveRegistryUrl(value: string, config: UserConfig): string {
+/** Turns the value of a registry flag into a URL: a URL, or a configured name. */
+function resolveNamedUrl(
+  flag: string,
+  value: string,
+  named: Record<string, string>,
+  config: UserConfig
+): string {
   // An own key only: every object has a `constructor`.
-  const named = Object.hasOwn(config.registries, value)
-    ? config.registries[value]
-    : undefined
-  if (named) return named
+  const url = Object.hasOwn(named, value) ? named[value] : undefined
+  if (url) return url
   if (isHttpUrl(value)) return value
-  const names = Object.keys(config.registries).sort()
+  const names = Object.keys(named).sort()
   const defined = names.length > 0 ? ` Defined names: ${names.join(', ')}.` : ''
   throw new DrxError(
     'usage',
-    `--registry takes a URL or a name defined in ${config.path}. "${value}" is neither.${defined}`
+    `${flag} takes a URL or a name defined in ${config.path}. "${value}" is neither.${defined}`
+  )
+}
+
+export function resolveRegistryUrl(value: string, config: UserConfig): string {
+  return resolveNamedUrl('--registry', value, config.registries, config)
+}
+
+export function resolveModuleRegistryUrl(
+  value: string,
+  config: UserConfig
+): string {
+  return resolveNamedUrl(
+    '--module-registry',
+    value,
+    config.moduleRegistries,
+    config
   )
 }

@@ -2,6 +2,7 @@ import { stripVTControlCharacters } from 'node:util'
 import { defineCommand, renderUsage, runCommand, type CommandDef } from 'citty'
 import { infoCommand } from './commands/info.js'
 import { initCommand } from './commands/init.js'
+import { moduleCommand } from './commands/module.js'
 import { defaultContext, type CliContext, type TextStream } from './context.js'
 import { DrxError } from './errors.js'
 import { cliVersion } from './package-root.js'
@@ -16,6 +17,7 @@ function mainCommand(context: CliContext) {
     subCommands: {
       init: initCommand(context),
       info: infoCommand(context),
+      module: moduleCommand(context),
     },
   })
 }
@@ -31,20 +33,32 @@ async function resolveMeta(command: CommandDef) {
   return typeof meta === 'function' ? await meta() : await meta
 }
 
-/** The usage of the command the arguments name, or of `drx` itself. */
+/**
+ * The usage of the command the arguments name, or of `drx` itself. A command
+ * may hold commands of its own, so the names are followed as far as they go.
+ */
 async function usage(
   main: CommandDef,
-  subCommands: Record<string, CommandDef>,
   argv: string[],
   startedAs: CliContext['startedAs']
 ): Promise<string> {
-  const name = argv.find((argument) => !argument.startsWith('-'))
-  const command = name ? subCommands[name] : undefined
-  if (command && startedAs && startedAs.command === name) {
+  let command = main
+  let parent: CommandDef | undefined
+  let path = 'drx'
+  for (const name of argv.filter((argument) => !argument.startsWith('-'))) {
+    const next = (
+      command.subCommands as Record<string, CommandDef> | undefined
+    )?.[name]
+    if (!next) break
+    parent = { meta: { name: path } }
+    path = `${path} ${name}`
+    command = next
+  }
+  if (startedAs && path === `drx ${startedAs.command}`) {
     const meta = { ...(await resolveMeta(command)), name: startedAs.name }
     return renderUsage({ ...command, meta })
   }
-  return command ? renderUsage(command, main) : renderUsage(main)
+  return renderUsage(command, parent)
 }
 
 /** The code and message to report for anything a command throws. */
@@ -77,13 +91,12 @@ export async function runCli(
 ): Promise<number> {
   const context = { ...defaultContext(), ...overrides }
   const main = mainCommand(context)
-  const subCommands = main.subCommands as Record<string, CommandDef>
   const { stdout, stderr } = context
 
   try {
     if (argv.includes('--help') || argv.includes('-h')) {
       stdout.write(
-        `${plain(stdout, await usage(main, subCommands, argv, context.startedAs))}\n`
+        `${plain(stdout, await usage(main, argv, context.startedAs))}\n`
       )
       return 0
     }

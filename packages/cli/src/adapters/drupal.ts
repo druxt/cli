@@ -5,6 +5,7 @@ import {
   type KindAdapter,
   type PackageVersion,
 } from './adapter.js'
+import { moduleProblem } from './drupal-fields.js'
 import { readJsonObject, stringMap } from './read-json.js'
 
 /** Any of these in `require` makes a Composer project a Drupal site. */
@@ -44,6 +45,8 @@ export const drupalAdapter: KindAdapter = {
     return CORE.some((name) => name in requires)
   },
 
+  moduleProblem,
+
   async packages(dir) {
     const requires = await required(dir)
     const versions = await installed(dir)
@@ -55,6 +58,10 @@ export const drupalAdapter: KindAdapter = {
       })
     )
   },
+
+  // The Druxt packages a module registry lists are frontend packages.
+  druxt: async () => undefined,
+  package: async () => undefined,
 
   addModule: addModuleNotAvailable,
 }

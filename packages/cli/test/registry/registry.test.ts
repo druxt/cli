@@ -1,8 +1,15 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { bundledRegistryDir } from '../../src/package-root.js'
+import { bundledRegistryDir, packageRoot } from '../../src/package-root.js'
 import {
   DEFAULT_REGISTRY,
   defaultStarter,
@@ -30,6 +37,58 @@ afterEach(async () => {
   await server?.close()
   server = undefined
   rmSync(bundled, { recursive: true, force: true })
+})
+
+describe('a default registry that is behind this build', () => {
+  const entries = { '/quickstart.json': entry }
+
+  test('gives way to the bundled copy when its revision is lower', async () => {
+    writeFileSync(
+      join(bundled, 'index.json'),
+      JSON.stringify({ revision: 2, starters: ['quickstart'] })
+    )
+    server = await serve({ ...entries, '/index.json': index })
+    const registry = await openRegistry({
+      defaultUrl: server.url,
+      bundledDir: bundled,
+    })
+    expect(registry.origin).toBe('bundled')
+    expect(registry.fallbackReason).toBe(
+      `${server.url} is older than this version of drx.`
+    )
+    expect((await registry.entry('quickstart')).url).toBe(
+      'https://example.com/bundled'
+    )
+  })
+
+  test('is read when its revision is the same or higher', async () => {
+    writeFileSync(
+      join(bundled, 'index.json'),
+      JSON.stringify({ revision: 2, starters: ['quickstart'] })
+    )
+    for (const revision of [2, 3]) {
+      server = await serve({
+        ...entries,
+        '/index.json': JSON.stringify({ revision, starters: ['quickstart'] }),
+      })
+      const registry = await openRegistry({
+        defaultUrl: server.url,
+        bundledDir: bundled,
+      })
+      expect(registry.origin).toBe('remote')
+      await server.close()
+    }
+    server = undefined
+  })
+
+  test('is read when the bundled copy cannot be', async () => {
+    server = await serve({ ...entries, '/index.json': index })
+    const registry = await openRegistry({
+      defaultUrl: server.url,
+      bundledDir: join(bundled, 'missing'),
+    })
+    expect(registry.origin).toBe('remote')
+  })
 })
 
 describe('a registry named by the user', () => {
@@ -192,7 +251,28 @@ describe('the bundled registry', () => {
       'https://codeload.github.com/druxt/quickstart/tar.gz/refs/heads/develop'
     )
     expect(starter.druxt.default).toBe(true)
+    expect(starter.druxt.requires.commands).toEqual([
+      ['php', 'composer'],
+      ['ddev'],
+    ])
     expect((await defaultStarter(registry))?.name).toBe('quickstart')
+  })
+})
+
+describe('the copy of the registry the build puts in the package', () => {
+  const source = join(packageRoot(), '..', '..', 'starters')
+  const copy = join(packageRoot(), 'starters')
+
+  // The copy exists only after a build. A stale one would be read by every
+  // other test here in place of starters/, so it has to match.
+  test.skipIf(!existsSync(copy))('equals starters/', () => {
+    const files = readdirSync(source).sort()
+    expect(readdirSync(copy).sort()).toEqual(files)
+    for (const file of files) {
+      expect(readFileSync(join(copy, file), 'utf8'), file).toBe(
+        readFileSync(join(source, file), 'utf8')
+      )
+    }
   })
 })
 
