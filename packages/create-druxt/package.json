@@ -1,6 +1,6 @@
 {
   "name": "create-druxt",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Create a Druxt site: npm create druxt runs the init command of @druxt/cli.",
   "keywords": [
     "druxt",
@@ -37,6 +37,6 @@
     "access": "public"
   },
   "dependencies": {
-    "@druxt/cli": "^0.0.0"
+    "@druxt/cli": "^0.1.0"
   }
 }
