@@ -12,10 +12,15 @@ export interface EngineProject {
  * run of other characters as one hyphen. Engines use the name as a host name.
  */
 export function siteProjectName(target: string): string {
-  const name = basename(target)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+  // One pass over the characters, so the time grows with the name's length
+  // whatever it holds.
+  let name = ''
+  for (const char of basename(target).toLowerCase()) {
+    const kept = /[a-z0-9]/.test(char)
+    if (kept) name += char
+    else if (name !== '' && !name.endsWith('-')) name += '-'
+  }
+  if (name.endsWith('-')) name = name.slice(0, -1)
   return name || 'druxt-site'
 }
 
