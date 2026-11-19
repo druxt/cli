@@ -17,6 +17,8 @@ import {
 const PATCHES_PLUGIN = 'cweagans/composer-patches'
 const PATCHES_PLUGIN_CONSTRAINT = '^2.0@beta'
 const PATCHES_PLUGIN_MAJOR = 2
+/** Where the plugin keeps the patches it has resolved. */
+const LOCK_FILE = 'patches.lock.json'
 
 type Json = Record<string, unknown>
 type Patches = Record<string, Record<string, string>>
@@ -121,6 +123,76 @@ function withPatches(
   return write(source, json)
 }
 
+/** True when a manifest has to gain a key for the patches plugin to run. */
+function needsAllowing(json: Json): boolean {
+  const allowed = isRecord(json.config)
+    ? json.config['allow-plugins']
+    : undefined
+  if (allowed === undefined) return true
+  if (Array.isArray(allowed)) return allowed.length === 0
+  return isRecord(allowed) && !(PATCHES_PLUGIN in allowed)
+}
+
+/**
+ * The manifest without the key that lets the patches plugin run, and
+ * without an `allow-plugins` or a `config` that leaves empty. It stays as it
+ * is while the manifest lists a patch, which the plugin is there to apply.
+ */
+function withoutAllowing(source: string): string {
+  const json = parseManifest(source)
+  const config = isRecord(json.config) ? json.config : {}
+  const allowed = config['allow-plugins']
+  if (!isRecord(allowed) || allowed[PATCHES_PLUGIN] !== true) return source
+  if (Object.keys(patchesOf(json)).length > 0) return source
+  const rest = { ...allowed }
+  delete rest[PATCHES_PLUGIN]
+  const next = { ...config }
+  if (Object.keys(rest).length === 0) delete next['allow-plugins']
+  else next['allow-plugins'] = rest
+  if (Object.keys(next).length === 0) delete json.config
+  else json.config = next
+  return write(source, json)
+}
+
+/** True for a lock file of the plugin that holds no patch. */
+function locksNothing(source: string): boolean {
+  try {
+    const lock: unknown = JSON.parse(source)
+    if (!isRecord(lock)) return false
+    const { patches } = lock
+    if (Array.isArray(patches)) return patches.length === 0
+    return isRecord(patches) && Object.keys(patches).length === 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The URLs of the patches the plugin has locked, by package. A patch is
+ * applied from the lock file, so one that is only in the manifest is not
+ * applied to anything yet.
+ */
+async function lockedPatches(dir: string): Promise<Map<string, string[]>> {
+  const found = new Map<string, string[]>()
+  try {
+    const lock: unknown = JSON.parse(
+      await readFile(join(dir, LOCK_FILE), 'utf8')
+    )
+    const patches = isRecord(lock) && isRecord(lock.patches) ? lock.patches : {}
+    for (const [name, list] of Object.entries(patches)) {
+      found.set(
+        name,
+        (Array.isArray(list) ? list : []).flatMap((patch: unknown) =>
+          isRecord(patch) && typeof patch.url === 'string' ? [patch.url] : []
+        )
+      )
+    }
+  } catch {
+    // No lock file, or one that cannot be read: nothing is locked.
+  }
+  return found
+}
+
 /**
  * The manifest without the patches an add wrote. A patch is taken out only
  * while it is still the one that was written: the same description with
@@ -165,6 +237,11 @@ interface Installed {
   requires: string[]
   /** The directory its files are in, when Composer recorded one. */
   path?: string
+  /**
+   * The URLs of the patches the package says were applied to it. Version 1
+   * of the plugin wrote them there. Version 2 keeps no such record.
+   */
+  patched: string[]
 }
 
 /** Each package Composer has installed, with its version and what it requires. */
@@ -178,9 +255,14 @@ async function installedPackages(dir: string): Promise<Map<string, Installed>> {
     for (const entry of Array.isArray(packages) ? packages : []) {
       if (isRecord(entry) && typeof entry.name === 'string') {
         const path = entry['install-path']
+        const extra = isRecord(entry.extra) ? entry.extra : {}
+        const applied = extra.patches_applied
         found.set(entry.name, {
           version: String(entry.version),
           requires: Object.keys(isRecord(entry.require) ? entry.require : {}),
+          patched: Object.values(isRecord(applied) ? applied : {}).filter(
+            (url) => typeof url === 'string'
+          ),
           // Composer writes it from the directory the file itself is in.
           ...(typeof path === 'string'
             ? { path: resolve(dir, 'vendor', 'composer', path) }
@@ -300,6 +382,7 @@ export async function planBackendAdd(
 
   const coreDir = coreModulesDir(dir, manifest)
   const installed = await installedPackages(dir)
+  const locked = await lockedPatches(dir)
   const enabled = ask ? await enabledModules(ask) : undefined
   const record: BackendRecord = { modules: [], patches: [] }
   const toRequire: string[] = []
@@ -307,6 +390,12 @@ export async function planBackendAdd(
   const unsure: string[] = []
   const patches: Patches = structuredClone(manifest.patches)
   let repatch = false
+  /** True when the manifest lists a patch the lock file does not have. */
+  let relock = false
+  /** The packages to install again, for a locked patch to be applied. */
+  const reapply = new Set<string>()
+  /** The first patch found in the manifest and not yet applied. */
+  let unfinished: string | undefined
 
   for (const need of needs) {
     const pkg = packageOf(need)
@@ -372,9 +461,28 @@ export async function planBackendAdd(
         continue
       }
       if (Object.values(patches[target] ?? {}).includes(patch.url)) {
-        change.notes.push(
-          `The patch "${patch.description}" is already in composer.json.`
-        )
+        // The manifest only says a patch is wanted. Whether it is applied
+        // is for the lock file and the installed package to say, and a run
+        // that stopped part way leaves the manifest ahead of both.
+        const there = installed.get(target)
+        if (!locked.get(target)?.includes(patch.url)) {
+          relock = true
+          if (there) repatch = true
+          change.notes.push(
+            `The patch "${patch.description}" is in composer.json and not in ${LOCK_FILE}, so the patches are locked again.`
+          )
+        } else if (there && !there.patched.includes(patch.url)) {
+          reapply.add(target)
+          change.notes.push(
+            `The patch "${patch.description}" is locked, and nothing on the site says ${target} was installed with it, so the package is installed again.`
+          )
+        } else {
+          change.notes.push(
+            `The patch "${patch.description}" is already in composer.json.`
+          )
+          continue
+        }
+        unfinished ??= patch.description
         continue
       }
       // The same name with another URL is a patch the site's owner wrote.
@@ -413,23 +521,23 @@ export async function planBackendAdd(
   const hasPlugin = PATCHES_PLUGIN in manifest.require
   const config = isRecord(manifest.json.config) ? manifest.json.config : {}
   const allowed = config['allow-plugins']
-  const first = record.patches[0]
-  if (first) {
+  const first = record.patches[0]?.description ?? unfinished
+  if (first !== undefined) {
     const without = 'pass --no-patches to add the module without the patch'
     const plugin = installed.get(PATCHES_PLUGIN)?.version
     const major = plugin ? semver.coerce(plugin)?.major : undefined
     if (major !== undefined && major < PATCHES_PLUGIN_MAJOR) {
       change.problems.push(
-        `This site has ${PATCHES_PLUGIN} ${plugin}, and the patch "${first.description}" is written for version ${PATCHES_PLUGIN_MAJOR} of the plugin, which keeps patches in a lock file. Update the plugin to version ${PATCHES_PLUGIN_MAJOR}, or ${without}.`
+        `This site has ${PATCHES_PLUGIN} ${plugin}, and the patch "${first}" is written for version ${PATCHES_PLUGIN_MAJOR} of the plugin, which keeps patches in a lock file. Update the plugin to version ${PATCHES_PLUGIN_MAJOR}, or ${without}.`
       )
     }
     if (allowed === false) {
       change.problems.push(
-        `composer.json sets allow-plugins to false, which turns every Composer plugin off, and the patch "${first.description}" needs ${PATCHES_PLUGIN}. Allow the plugin there, or ${without}.`
+        `composer.json sets allow-plugins to false, which turns every Composer plugin off, and the patch "${first}" needs ${PATCHES_PLUGIN}. Allow the plugin there, or ${without}.`
       )
     } else if (isRecord(allowed) && allowed[PATCHES_PLUGIN] === false) {
       change.problems.push(
-        `composer.json turns ${PATCHES_PLUGIN} off under allow-plugins, and the patch "${first.description}" needs it. Allow the plugin there, or ${without}.`
+        `composer.json turns ${PATCHES_PLUGIN} off under allow-plugins, and the patch "${first}" needs it. Allow the plugin there, or ${without}.`
       )
     }
   }
@@ -447,33 +555,51 @@ export async function planBackendAdd(
   }
   // Each step carries what it will have done, so a run that stops part way
   // can still say what it did.
-  const composer = (args: string[], done?: BackendRecord) =>
+  const tool = (name: string) => (args: string[], done?: BackendRecord) =>
     change.steps.push({
-      run: { tool: 'composer', args },
+      run: { tool: name, args },
       ...(done ? { record: done } : {}),
     })
+  const composer = tool('composer')
+  const drush = tool('drush')
 
-  if (record.patches.length > 0) {
+  // The plugin is added to a site without it, and what was added is kept:
+  // a remove takes out the requirement and the permission it put there, and
+  // never one the site had.
+  const patching = first !== undefined
+  const allow = patching && !hasPlugin && needsAllowing(manifest.json)
+  if (patching && !hasPlugin)
+    record.patcher = { required: true, allowed: allow }
+  const writes = record.patches.length
+  if (writes > 0 || allow) {
     // Allowed before it is required, or Composer stops to ask.
-    const allow = !hasPlugin
-    const count = record.patches.length
     change.steps.push({
       edit: {
         file: 'composer.json',
-        change: (source) => withPatches(source, record.patches, allow),
-        summary: `Add ${count} patch${count === 1 ? '' : 'es'} to composer.json`,
+        change: (source) => withPatches(source, record.patches, !hasPlugin),
+        summary:
+          writes > 0
+            ? `Add ${writes} patch${writes === 1 ? '' : 'es'} to composer.json`
+            : `Allow ${PATCHES_PLUGIN} in composer.json`,
       },
-      record: { modules: [], patches: record.patches },
+      record: {
+        modules: [],
+        patches: record.patches,
+        ...(allow ? { patcher: { required: false, allowed: true } } : {}),
+      },
     })
-    if (!hasPlugin) {
-      composer([
-        'require',
-        '--',
-        `${PATCHES_PLUGIN}:${PATCHES_PLUGIN_CONSTRAINT}`,
-      ])
-    }
-    composer(['patches-relock'])
   }
+  if (patching && !hasPlugin) {
+    composer(
+      ['require', '--', `${PATCHES_PLUGIN}:${PATCHES_PLUGIN_CONSTRAINT}`],
+      {
+        modules: [],
+        patches: [],
+        patcher: { required: true, allowed: false },
+      }
+    )
+  }
+  if (writes > 0 || relock) composer(['patches-relock'])
   if (toRequire.length > 0) {
     composer(['require', '--', ...toRequire], {
       modules: record.modules
@@ -482,16 +608,19 @@ export async function planBackendAdd(
       patches: [],
     })
   }
-  if (record.patches.length > 0 && repatch) composer(['patches-repatch'])
+  // Every patched package is installed again once the patches are locked
+  // anew. Otherwise only one that a locked patch may not be applied to.
+  if ((writes > 0 || relock) && repatch) composer(['patches-repatch'])
+  else if (reapply.size > 0) composer(['reinstall', '--', ...reapply])
+  // The backend keeps its container by the set of packages installed, so
+  // after a change to that set it may answer from one built for another.
+  if ((patching && !hasPlugin) || toRequire.length > 0) drush(['cr'])
   if (toEnable.length > 0) {
-    change.steps.push({
-      run: { tool: 'drush', args: ['en', '-y', '--', ...toEnable] },
-      record: {
-        modules: record.modules
-          .filter((module) => module.enabled)
-          .map((module) => ({ ...module, required: false })),
-        patches: [],
-      },
+    drush(['en', '-y', '--', ...toEnable], {
+      modules: record.modules
+        .filter((module) => module.enabled)
+        .map((module) => ({ ...module, required: false })),
+      patches: [],
     })
   }
 
@@ -518,7 +647,7 @@ export async function planBackendAdd(
           modules.push({ name, enabled: true, required: false })
         }
       }
-      return { modules, patches: done.patches }
+      return { ...done, modules }
     }
   }
   return change
@@ -543,21 +672,42 @@ export async function planBackendRemove(
   const { record, ask } = request
   if (!record) return change
 
+  let listed: Map<string, string> | undefined | null = null
+  const enabledNow = async () => {
+    if (listed === null) listed = ask ? await enabledModules(ask) : undefined
+    return listed
+  }
+
+  // Whether a module is enabled is asked twice, of the list of enabled
+  // modules and of a simulated uninstall. The first reads the site's
+  // configuration and the second its container, which may have been built
+  // for another set of packages. Only an answer both give is acted on.
   const stays = new Set<string>()
   const dependents = new Map<string, string[]>()
   for (const { name, package: pkg, enabled, required } of record.modules) {
     if (!enabled) continue
     const found = ask ? await uninstallList(ask, name) : undefined
-    if (found === 'absent') {
-      change.notes.push(`${name} is not enabled, so it is not uninstalled.`)
-    } else if (found) {
-      dependents.set(name, found)
-    } else {
+    const byHand = `drush pm:uninstall ${name}${required && pkg ? `, then composer remove ${pkg}` : ''}`
+    if (!found) {
       stays.add(name)
       change.manual.push(
-        `The backend could not say what depends on ${name}, so it was left enabled. Once nothing does: drush pm:uninstall ${name}${required && pkg ? `, then composer remove ${pkg}` : ''}`
+        `The backend could not say what depends on ${name}, so it was left enabled. Once nothing does: ${byHand}`
       )
+      continue
     }
+    const list = await enabledNow()
+    if (list?.has(name) === (found !== 'absent')) {
+      if (found === 'absent') {
+        change.notes.push(`${name} is not enabled, so it is not uninstalled.`)
+      } else {
+        dependents.set(name, found)
+      }
+      continue
+    }
+    stays.add(name)
+    change.manual.push(
+      `The backend ${list ? 'gave two answers about' : 'could not say'} whether ${name} is enabled, so it was left as it is. Rebuild its caches with drush cr and run this again, or once nothing depends on it: ${byHand}`
+    )
   }
   // A module goes only when everything that would go with it is going too.
   let going = [...dependents.keys()]
@@ -591,17 +741,14 @@ export async function planBackendRemove(
     [...installed].some(
       ([name, { requires }]) => !packages.has(name) && requires.includes(pkg)
     )
-  let listed: Map<string, string> | undefined | null = null
-  const enabledNow = async () => {
-    if (listed === null) listed = ask ? await enabledModules(ask) : undefined
-    return listed
-  }
   const unowned = removing.filter(
     (module) => !module.enabled && !heldByAnother(module.package as string)
   )
   for (const { name, package: pkg } of unowned) {
     const enabled = await enabledNow()
-    if (enabled && !enabled.has(name)) continue
+    // Off for the list and for a simulated uninstall, or it stays.
+    const off = ask && enabled && !enabled.has(name)
+    if (off && (await uninstallList(ask, name)) === 'absent') continue
     stays.add(name)
     packages.delete(pkg as string)
     change.notes.push(
@@ -656,6 +803,8 @@ export async function planBackendRemove(
     patch.module ? !keeps(patch.module) : stays.size + required.length === 0
   )
   const unpatched = new Set<string>()
+  /** True when the manifest is left with no patch for the plugin to apply. */
+  let noPatchLeft = false
   if (manifest) {
     const patches: Patches = structuredClone(manifest.patches)
     for (const patch of leaving) {
@@ -665,6 +814,7 @@ export async function planBackendRemove(
       if (Object.keys(forPackage).length === 0) delete patches[patch.package]
       unpatched.add(patch.package)
     }
+    noPatchLeft = Object.keys(patches).length === 0
     if (unpatched.size > 0) {
       const count = leaving.filter((patch) =>
         unpatched.has(patch.package)
@@ -679,16 +829,27 @@ export async function planBackendRemove(
     }
   }
 
-  const composer = (...args: string[]) =>
-    change.steps.push({ run: { tool: 'composer', args } })
+  // The plugin an add put there goes with the last patch of the site, and
+  // so does the permission the add gave it. Neither goes while the record
+  // does not say the add put it there, or while a patch is left.
+  const { patcher } = record
+  const done = patcher !== undefined && manifest !== undefined && noPatchLeft
+  const dropPlugin =
+    done && patcher.required && PATCHES_PLUGIN in manifest.require
+  const shared = dropPlugin && heldByAnother(PATCHES_PLUGIN)
+
+  const run = (tool: string, ...args: string[]) =>
+    change.steps.push({ run: { tool, args } })
+  const composer = (...args: string[]) => run('composer', ...args)
   // Composer's remove fails on a package another one still requires, after
   // it has taken the requirement out. So that one is only taken out of the
   // manifest. The rest are removed without letting Composer update what
   // they depended on, which is every package of core.
-  if (kept.length > 0) composer('remove', '--no-update', '--', ...kept)
+  const held = [...kept, ...(shared ? [PATCHES_PLUGIN] : [])]
+  if (held.length > 0) composer('remove', '--no-update', '--', ...held)
   if (free.length > 0) {
     composer('remove', '--no-update-with-dependencies', '--', ...free)
-  } else if (kept.length > 0) {
+  } else if (held.length > 0) {
     composer('update', '--lock')
   }
   if (unpatched.size > 0) {
@@ -699,6 +860,40 @@ export async function planBackendRemove(
     )
     if (still.length > 0) composer('reinstall', '--', ...still)
   }
+  // With what it depends on, which nothing else of the site uses.
+  if (dropPlugin && !shared) composer('remove', '--', PATCHES_PLUGIN)
+  const config = isRecord(manifest?.json.config) ? manifest.json.config : {}
+  const allowed = config['allow-plugins']
+  if (
+    done &&
+    patcher.allowed &&
+    isRecord(allowed) &&
+    allowed[PATCHES_PLUGIN] === true
+  ) {
+    // After the plugin has gone: Composer stops one that is not allowed.
+    change.steps.push({
+      edit: {
+        file: 'composer.json',
+        change: withoutAllowing,
+        summary: `Remove ${PATCHES_PLUGIN} from allow-plugins in composer.json`,
+      },
+    })
+  }
+  if (dropPlugin && !shared) {
+    // The plugin's own file, which nothing reads once the plugin has gone.
+    change.steps.push({
+      remove: {
+        file: LOCK_FILE,
+        when: locksNothing,
+        summary: `Delete ${LOCK_FILE}`,
+      },
+    })
+  }
+  // The backend keeps its container by the set of packages installed. A set
+  // it has had before brings back the container built for it then, with the
+  // modules that were enabled then.
+  const fewer = free.length > 0 || (dropPlugin && !shared)
+  if (fewer && (!ask || (await enabledNow()))) run('drush', 'cr')
 
   const left: BackendRecord = {
     modules: [
@@ -707,7 +902,10 @@ export async function planBackendRemove(
       ...required.map((module) => ({ ...module, enabled: false })),
     ],
     patches: record.patches.filter((patch) => !leaving.includes(patch)),
+    ...(patcher && !done ? { patcher } : {}),
   }
-  if (left.modules.length + left.patches.length > 0) change.record = left
+  if (left.modules.length + left.patches.length > 0 || left.patcher) {
+    change.record = left
+  }
   return change
 }

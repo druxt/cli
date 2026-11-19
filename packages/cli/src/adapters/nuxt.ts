@@ -197,6 +197,7 @@ async function addModule(
     change.manual.push(
       `Add '${name}' to the modules array of the config. No config file was found.`
     )
+    did.byHand = true
     return change
   }
   const edit = editModules(await readFile(join(dir, file), 'utf8'), name, 'add')
@@ -214,6 +215,7 @@ async function addModule(
     change.manual.push(
       `Add '${name}' to the modules array in ${file}. It could not be edited safely.`
     )
+    did.byHand = true
   } else {
     change.notes.push(`${name} is already in modules in ${file}.`)
   }
@@ -224,7 +226,8 @@ async function addModule(
  * The steps that take away what an add did: the package when it installed
  * it, and the entry in the config when it wrote it. What the part had before
  * stays, and so does everything when the record does not say who put it
- * there.
+ * there. An entry the add left to the user is left to the user again: the
+ * add could not read the config, so nothing says whether the entry is there.
  */
 async function removeModule(
   dir: string,
@@ -266,11 +269,24 @@ async function removeModule(
       )
     }
   }
+  if (did.byHand && !did.listed) {
+    if (edit?.kind !== 'unchanged') {
+      const where = file ? `in ${file}` : 'of the config'
+      const why = file ? 'could not edit the file' : 'found no config file'
+      change.manual.push(
+        `Remove '${name}' from the modules array ${where}, if you added it there. drx add ${why} and left that line to you, so it is yours to take out.`
+      )
+    }
+    return change
+  }
   if (!file || !edit || !listed) return change
   if (!did.listed) {
-    change.notes.push(
-      `${name} was in modules in ${file} before drx add, so it stays.`
-    )
+    // Only a config that can be read says the entry is there.
+    if (edit.kind === 'changed') {
+      change.notes.push(
+        `${name} was in modules in ${file} before drx add, so it stays.`
+      )
+    }
   } else if (edit.kind === 'changed') {
     change.steps.push({
       edit: {

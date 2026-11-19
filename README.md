@@ -142,8 +142,8 @@ npx @druxt/cli add breadcrumb --dry-run
 
 For each module it does two things:
 
-- **Frontend.** It installs the package with the project's package manager, and adds the package to the `modules` array of `nuxt.config`. The rest of the file stays as you wrote it. When the config is a function, or its `modules` is not an array written out in the file, the package is installed, the file is left alone and the line to add is printed.
-- **Backend.** For each Drupal module the entry lists, a contributed one is required with Composer and enabled with Drush, and a core one is only enabled. The commands run through the part's engine: `ddev composer`, `lando drush`, or `composer` and `vendor/bin/drush` for the `php` engine.
+- **Frontend.** It installs the package with the project's package manager, and adds the package to the `modules` array of `nuxt.config`. The rest of the file stays as you wrote it. When the config is a function, or its `modules` is not an array written out in the file, the package is installed, the file is left alone and the line to add is printed. The record says that the line was left to you.
+- **Backend.** For each Drupal module the entry lists, a contributed one is required with Composer and enabled with Drush, and a core one is only enabled. The commands run through the part's engine: `ddev composer`, `lando drush`, or `composer` and `vendor/bin/drush` for the `php` engine. Once Composer has changed which packages are installed, `drush cr` rebuilds the caches before Drupal is asked anything more. Drupal keeps its container by the set of installed packages, so a set the site has had before brings back the container built for it then.
 
 The package manager is found as `drx init --install` finds it. The one a `package.json` names in `packageManager` comes first, looked for from the root of the project down to the part, so a workspace is installed with the manager of its root. Without one it is the manager of the first lock file on the same way down, and npm when there is no lock file.
 
@@ -172,7 +172,9 @@ What it refuses, before it takes any step:
 
 **Where the backend is not run from here.** With the `none` engine, or in a project that does not record an engine, the frontend is done and the Composer and Drush lines are printed under "Left to do", for you to run where the backend is. `add` cannot look in such a backend. Where the registry does not say whether a module is part of core, the `composer require` line names it, and a note says that a core module needs the enable line only.
 
-**Patches.** A Drupal module in the registry may list patches. `add` shows each with its issue and writes it to `extra.patches` in the site's `composer.json`. It then runs `composer patches-relock`, and `composer patches-repatch` when the patched package is installed already, whether the site requires it or another package brought it in. When the site lacks `cweagans/composer-patches`, it allows the plugin and requires it. Allowing it adds one key to `allow-plugins`, as Composer does when you answer its own question. A list gets the key, and a site with no list gets one. `true` already allows every plugin and is left as it is. A patch is skipped when the installed package is at or past the version that has the fix, and when the site already has the same patch.
+**Patches.** A Drupal module in the registry may list patches. `add` shows each with its issue and writes it to `extra.patches` in the site's `composer.json`. It then runs `composer patches-relock`, and `composer patches-repatch` when the patched package is installed already, whether the site requires it or another package brought it in. When the site lacks `cweagans/composer-patches`, it allows the plugin and requires it, and the record says which of the two `add` did. Allowing it adds one key to `allow-plugins`, as Composer does when you answer its own question. A list gets the key, and a site with no list gets one. `true` already allows every plugin and is left as it is. A patch is skipped when the installed package is at or past the version that has the fix.
+
+Whether a patch is applied is read from the site. `composer.json` only lists the patch. A patch that `composer.json` lists and `patches.lock.json` does not is locked and applied, so a run that stopped at the lock file is finished by the next one. Version 2 of the plugin does not record on a package which patches were applied to it. So when a patch is locked and its package is installed, `add` installs that package again with `composer reinstall`, which applies the patch. A patch that is locked for a package still to be installed is left alone.
 
 **A project with no backend part.** The frontend is done, and what the module needs of a backend is listed under "Left to do": the modules to enable, their patches and their setup steps.
 
@@ -195,6 +197,7 @@ It needs the record and not the registry. A module the registry no longer lists 
 It works from the record in `drx.config.json`:
 
 - The package is uninstalled when `add` installed it, and taken out of the `modules` array when `add` listed it. A package or an entry the site had before stays, with a line saying so. The rest of the config file stays as you wrote it.
+- Where `add` printed the line for you to add, `remove` prints the line for you to remove, under "Left to do". `add` could not read that config, so `remove` does not claim the entry was there before.
 - A module with no record is refused, and the exit code is 1: `add` did nothing for it, so there is nothing to undo. That goes for a module the project does not have, and for one you installed yourself.
 - A record written by an earlier version does not say who installed the package. `remove` then leaves the frontend alone and prints the lines that take it out.
 
@@ -202,8 +205,11 @@ The backend is left alone unless `--backend` is given. With it, `remove` undoes 
 
 - It uninstalls the Drupal modules `add` enabled. A module that was enabled before `add` ran is not uninstalled.
 - It takes out the Composer requirements `add` added, and the patches it wrote. A package that another package still requires only leaves `composer.json`. A package that loses a patch and stays installed is reinstalled without it.
+- With the last patch in `composer.json` it takes out `cweagans/composer-patches`, the key that allowed it and its `patches.lock.json`, each only when the record says `add` put it there. A plugin the site had stays. A plugin that another module's patch still needs stays too, and moves to the record of that module.
+- Once Composer has taken packages out, `drush cr` rebuilds the caches, as after an `add`.
 - A package stays required while a module in it is still enabled, so no enabled module loses its files. `remove` names the module.
 - Before it uninstalls a module it asks Drupal what else that would uninstall, with `drush pm:uninstall --simulate -- <module>`. Drupal uninstalls the modules that depend on one along with it. So a module that another enabled module depends on stays, with its requirement and its patches, and `remove` names what depends on it.
+- Whether a module is enabled is asked twice, of `drush pm:list` and of the simulated uninstall. The first reads the site's configuration and the second its container, which can be out of date. When the two disagree, or one of them cannot be had, the module stays enabled and required, its record is not changed, and the commands are printed under "Left to do".
 - When Drupal cannot be asked, nothing is uninstalled and the command is printed under "Left to do".
 - A Drupal module that another Druxt module in the project needs stays. It moves to the record of that module when it has one, along with anything Drupal holds on to because of it, so removing that module takes it all out.
 
@@ -368,9 +374,11 @@ A kind is `nuxt` or `drupal` in this version.
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `frontend.installed` | `true` when `add` installed the package, `false` when the part had it                                                           |
 | `frontend.listed`    | `true` when `add` wrote the entry in the config, `false` when it was there                                                      |
+| `frontend.byHand`    | `true` when `add` could not write the entry and printed the line for you to add. Absent otherwise                               |
 | `modules.enabled`    | `true` when `add` enabled the Drupal module, or Drupal enabled it along with one `add` did. `false` when it was enabled already |
 | `modules.required`   | `true` when `add` added the Composer requirement. A core module has no `package`                                                |
 | `patches`            | Each patch `add` wrote: its `package`, `description` and `url`, and the `module` it was written for                             |
+| `patcher`            | Present when `add` brought the patches plugin: `required` for its Composer requirement, `allowed` for its `allow-plugins` key   |
 
 The names in a record are handed to the same tools as those of the registry, and the file travels with a clone of the project. So they are checked as the file is read, by the rules for the same names in a registry. A value that breaks one makes the file invalid, and the message names the field.
 
@@ -488,7 +496,7 @@ The package includes a copy of the public registry. When the public registry can
 
 The module commands read `https://cdn.jsdelivr.net/gh/druxt/modules@main/modules.json`, which the [druxt/modules](https://github.com/druxt/modules) repository publishes. The CLI reads `schemaVersion` 1. It refuses any other version with a message saying so, and ignores fields it has no use for.
 
-The names in an entry become arguments of a package manager or a backend tool, so each is checked as the registry is read. A package name has to be one npm takes, and the name of a Drupal module has to be a machine name. A `composer.package` and the `package` of a patch have to be Composer names, as in `vendor/name`. A `composer.constraint` may hold only what a version constraint is made of. Anything else, such as a name that starts with a hyphen, makes the registry invalid, and the message names the entry and the field.
+The names in an entry become arguments of a package manager or a backend tool, so each is checked as the registry is read. A package name has to be one npm takes, and the name of a Drupal module has to be a machine name. A `composer.package` and the `package` of a patch have to be Composer names, as in `vendor/name`. A `composer.constraint` has to be a set of version constraints as Composer writes them, such as `^3.26 || ^4.0`, `>=1.0 <2.0` or `1.0 - 2.0`: versions with or without an operator, ranges, branches, aliases and stability flags. A word that is none of these is refused, and so is any word that begins with a hyphen. Anything else, such as a name that starts with a hyphen, makes the registry invalid, and the message names the entry and the field.
 
 The registry is cached on disk:
 

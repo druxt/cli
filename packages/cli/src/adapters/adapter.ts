@@ -93,10 +93,25 @@ export interface FileEdit {
 }
 
 /**
+ * A file of the part to delete. Whether it goes is worked out from the file
+ * as it is when the step is taken, and a file that is not there is left out.
+ */
+export interface FileRemoval {
+  /** Relative to the part. */
+  file: string
+  /** True when the file, with the content it has now, is to go. */
+  when(source: string): boolean
+  /** What the step does, as one line. */
+  summary: string
+}
+
+/**
  * One step of a change. For an add it carries what it will have done once
  * it is taken, so the record can say what was done when a later step fails.
  */
-export type ChangeStep = ({ run: ToolRun } | { edit: FileEdit }) & {
+export type ChangeStep = (
+  { run: ToolRun } | { edit: FileEdit } | { remove: FileRemoval }
+) & {
   /** What the step does about the package of the module. */
   did?: Partial<PackageRecord>
   /** What the step does to a backend part. */
@@ -145,6 +160,11 @@ export interface PackageRecord {
   installed: boolean
   /** True when it listed the package in the config, false when it was there. */
   listed: boolean
+  /**
+   * True when it could not write to the config, and left the line that lists
+   * the package to the user. Nothing then says whether the line is there.
+   */
+  byHand?: boolean
 }
 
 /** What an add did to a backend part, kept so a remove undoes that and no more. */
@@ -166,6 +186,13 @@ export interface BackendRecord {
     /** Absent in a record written before the module was kept. */
     module?: string
   }[]
+  /**
+   * What the add put in the part for its patches to be applied with, when
+   * the part did not have it: `required` for the requirement on the tool that
+   * applies them, `allowed` for the permission that lets the tool run. Absent
+   * when the part had both. They go with the last patch of the part.
+   */
+  patcher?: { required: boolean; allowed: boolean }
 }
 
 /** The steps of a change to one part, in the order to take them. */

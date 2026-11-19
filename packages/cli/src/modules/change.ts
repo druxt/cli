@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { adapterFor, type KindAdapter } from '../adapters/index.js'
 import type {
@@ -41,6 +41,13 @@ export type PlannedStep = (
       type: 'edit'
       file: string
       change: (source: string) => string
+      display: string
+    }
+  | {
+      type: 'remove'
+      file: string
+      /** True when the file, as it is when the step is taken, is to go. */
+      when: (source: string) => boolean
       display: string
     }
 ) & {
@@ -172,7 +179,8 @@ function unusable(project: Project, role: Part['role']): string[] {
 }
 
 const hasAny = (record: BackendRecord) =>
-  record.modules.length + record.patches.length > 0
+  record.modules.length + record.patches.length > 0 ||
+  record.patcher !== undefined
 
 /** Two records of what was done to one backend part, as one. */
 function mergeBackend(a: BackendRecord, b: BackendRecord): BackendRecord {
@@ -193,7 +201,16 @@ function mergeBackend(a: BackendRecord, b: BackendRecord): BackendRecord {
   for (const patch of b.patches) {
     if (!patches.some((other) => key(other) === key(patch))) patches.push(patch)
   }
-  return { modules, patches }
+  // What either put there for the patches of the part was put there.
+  const patcher =
+    a.patcher || b.patcher
+      ? {
+          required:
+            a.patcher?.required === true || b.patcher?.required === true,
+          allowed: a.patcher?.allowed === true || b.patcher?.allowed === true,
+        }
+      : undefined
+  return { modules, patches, ...(patcher ? { patcher } : {}) }
 }
 
 /** One part's record folded into the list kept for a module. */
@@ -220,10 +237,13 @@ function withBackend(
 function mergeRecords(old: ModuleRecord, now: ModuleRecord): ModuleRecord {
   const frontend = (now.frontend ?? []).map((entry) => {
     const before = old.frontend?.find(({ path }) => path === entry.path)
+    const listed = entry.listed || before?.listed === true
     return {
       path: entry.path,
       installed: entry.installed || before?.installed === true,
-      listed: entry.listed || before?.listed === true,
+      listed,
+      // A line left to the user stays so until an add writes it itself.
+      ...(!listed && (entry.byHand || before?.byHand) ? { byHand: true } : {}),
     }
   })
   // What this add did comes first, so a run that finishes what an earlier
@@ -263,6 +283,15 @@ function planned(
       file: join(dir, step.edit.file),
       change: step.edit.change,
       display: step.edit.summary,
+      ...records,
+    }
+  }
+  if ('remove' in step) {
+    return {
+      type: 'remove',
+      file: join(dir, step.remove.file),
+      when: step.remove.when,
+      display: step.remove.summary,
       ...records,
     }
   }
@@ -393,7 +422,7 @@ export async function planAdd(
   }
 
   const npm = module.npm
-  const frontend: { path: string; part: PartPlan }[] = []
+  const frontend: { path: string; part: PartPlan; byHand: boolean }[] = []
   for (const at of located(project, 'frontend')) {
     const druxt = await at.adapter.druxt(at.dir)
     const fit = compatibility(module.druxt, druxt)
@@ -418,7 +447,10 @@ export async function planAdd(
     absorb(plan, change)
     const part = frontendPlan(at, change)
     plan.parts.push(part)
-    if (change.did) frontend.push({ path: at.part.path, part })
+    if (change.did) {
+      const byHand = change.did.byHand === true
+      frontend.push({ path: at.part.path, part, byHand })
+    }
   }
   // With no part to put the package in, nothing would be added at all.
   if (frontend.length === 0) {
@@ -486,10 +518,14 @@ export async function planAdd(
     const now: ModuleRecord = {
       name: module.name,
       package: npm,
-      frontend: frontend.map(({ path, part }) => ({
+      frontend: frontend.map(({ path, part, byHand }) => ({
         path,
         installed: taken(part).some((step) => step.did?.installed === true),
         listed: taken(part).some((step) => step.did?.listed === true),
+        // The line is left to the user once the steps before it are done.
+        ...(byHand && part.steps.every((step) => step.done)
+          ? { byHand: true }
+          : {}),
       })),
       backend: [],
     }
@@ -551,16 +587,22 @@ export async function planRemove(
 
   for (const at of located(project, 'frontend')) {
     // A record with a frontend list says what was done to every part.
+    const none: PackageRecord = { installed: false, listed: false }
     const did = recorded.frontend
-      ? (recorded.frontend.find(({ path }) => path === at.part.path) ?? {
-          installed: false,
-          listed: false,
-        })
+      ? (recorded.frontend.find(({ path }) => path === at.part.path) ?? none)
       : undefined
     const change = await at.adapter.removeModule(at.dir, {
       ...(module.npm ? { package: module.npm } : {}),
       root: project.root,
-      ...(did ? { did: { installed: did.installed, listed: did.listed } } : {}),
+      ...(did
+        ? {
+            did: {
+              installed: did.installed,
+              listed: did.listed,
+              ...(did.byHand ? { byHand: true } : {}),
+            },
+          }
+        : {}),
     })
     absorb(plan, change)
     plan.parts.push(frontendPlan(at, change))
@@ -648,6 +690,7 @@ export async function planRemove(
       record: {
         modules: entry.modules.filter((held) => !staying.includes(held)),
         patches: entry.patches.filter((patch) => !stays(patch)),
+        ...(entry.patcher ? { patcher: entry.patcher } : {}),
       },
       ...(ask ? { ask } : {}),
     })
@@ -657,10 +700,28 @@ export async function planRemove(
     // What the backend itself holds on to goes with what was handed over:
     // it is held by a module that stays, and comes out when that one does.
     const heir = plan.handOver.find((handed) => handed.path === path)
+    // What the part keeps for the patches of other modules goes on the
+    // record of one that has a patch in it, to come out with the last.
+    const { patcher, ...own } = change.record
+    const patched = patcher
+      ? project.config.modules?.find(
+          (other) =>
+            other.name !== recorded.name &&
+            other.backend.some(
+              (held) => held.path === path && held.patches.length > 0
+            )
+        )
+      : undefined
+    const stay: BackendRecord = patched ? own : change.record
+    if (patched && patcher) {
+      const record: BackendRecord = { modules: [], patches: [], patcher }
+      plan.handOver.push({ to: patched.name, path, record })
+    }
+    if (!hasAny(stay)) continue
     if (heir) {
-      heir.record = mergeBackend(heir.record, change.record)
+      heir.record = mergeBackend(heir.record, stay)
     } else {
-      left = withBackend(left, path, change.record)
+      left = withBackend(left, path, stay)
     }
   }
   keep(left)
@@ -835,6 +896,17 @@ export async function carryOut(
         return
       }
       if (content !== source) await writeFile(step.file, content)
+      output.did(label)
+    } else if (step.type === 'remove') {
+      // A file that is not there, or is no longer what was to go, stays out
+      // of it: the step is done either way.
+      let source: string | undefined
+      try {
+        source = await readFile(step.file, 'utf8')
+      } catch {
+        source = undefined
+      }
+      if (source !== undefined && step.when(source)) await rm(step.file)
       output.did(label)
     } else {
       output.note(label)

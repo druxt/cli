@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -21,6 +21,9 @@ const PATCH = {
   url: 'https://example.com/mr/12.diff',
   issue: 'https://example.com/issue/12',
 }
+
+/** On the record of a site that got the patches plugin from drx add. */
+const ADDED_PLUGIN = { required: true, allowed: true }
 
 const entry = (name: string, extra: Record<string, unknown>) => ({
   name,
@@ -148,6 +151,11 @@ interface Backend {
   unreadable?: boolean
   /** For a module, what the backend enables along with it. */
   brings?: Record<string, string[]>
+  /**
+   * Enabled modules its container does not know of, until its caches are
+   * rebuilt: a simulated uninstall says each is not installed.
+   */
+  stale?: string[]
 }
 
 /**
@@ -164,6 +172,7 @@ function tools(
   const calls: string[] = []
   const asked: string[] = []
   const enabled = new Set(backend.enabled ?? [])
+  const stale = new Set(backend.stale ?? [])
   const exec: CliContext['exec'] = async (command, args, { cwd }) => {
     const line = `${relative(root, cwd)}$ ${command} ${args.join(' ')}`
     if (args.includes('pm:list')) {
@@ -181,7 +190,7 @@ function tools(
       asked.push(line)
       const name = args.findLast((arg) => !arg.startsWith('-')) as string
       if (backend.unreadable) return { code: 1, output: 'No database.' }
-      if (!enabled.has(name)) {
+      if (!enabled.has(name) || stale.has(name)) {
         return {
           code: 1,
           output: `The following module(s) are not installed: ${name}. No modules to uninstall.`,
@@ -195,6 +204,7 @@ function tools(
     }
     calls.push(line)
     if (fail && line.includes(fail.on)) return { code: 1, output: fail.output }
+    if (args.at(-1) === 'cr') stale.clear()
     if (MANAGERS.includes(command)) {
       const file = join(cwd, 'package.json')
       const manifest = JSON.parse(readFileSync(file, 'utf8'))
@@ -224,6 +234,32 @@ function tools(
         Object.entries(require).sort(([a], [b]) => a.localeCompare(b))
       )
       writeFileSync(file, JSON.stringify(manifest, null, 4) + '\n')
+    }
+    // The patches plugin locks what the manifest lists, in a file of its own.
+    if (composer[0] === 'patches-relock') {
+      const manifest = JSON.parse(
+        readFileSync(join(cwd, 'composer.json'), 'utf8')
+      )
+      const listed: Record<string, Record<string, string>> = manifest.extra
+        ?.patches ?? {}
+      const patches = Object.fromEntries(
+        Object.entries(listed).map(([name, each]) => [
+          name,
+          Object.entries(each).map(([description, url]) => ({
+            package: name,
+            description,
+            url,
+          })),
+        ])
+      )
+      writeFileSync(
+        join(cwd, 'patches.lock.json'),
+        JSON.stringify(
+          { patches: Object.keys(patches).length > 0 ? patches : [] },
+          null,
+          4
+        ) + '\n'
+      )
     }
     const names = args
       .slice(args.indexOf('-y') + 1)
@@ -277,6 +313,7 @@ const DRY_RUN = [
   '    run   ddev composer require -- cweagans/composer-patches:^2.0@beta',
   '    run   ddev composer patches-relock',
   '    run   ddev composer require -- drupal/decoupled_router',
+  '    run   ddev drush cr',
   '    run   ddev drush en -y -- decoupled_router',
   '',
   'Nothing was changed: this was a dry run.',
@@ -350,6 +387,7 @@ describe('drx add', () => {
       'drupal$ ddev composer require -- cweagans/composer-patches:^2.0@beta',
       'drupal$ ddev composer patches-relock',
       'drupal$ ddev composer require -- drupal/decoupled_router',
+      'drupal$ ddev drush cr',
       'drupal$ ddev drush en -y -- decoupled_router',
     ])
     expect(readFileSync(join(root, 'nuxt/nuxt.config.js'), 'utf8')).toContain(
@@ -391,6 +429,7 @@ describe('drx add', () => {
                 module: 'decoupled_router',
               },
             ],
+            patcher: ADDED_PLUGIN,
           },
         ],
       },
@@ -476,6 +515,51 @@ describe('drx add', () => {
         "  Add 'druxt-blocks' to the modules array in nuxt.config.js. It could not be edited safely.",
       ].join('\n')
     )
+    // The record says the line was left to the user, and not that it is there.
+    expect(config(root).modules[0].frontend).toEqual([
+      { path: 'nuxt', installed: true, listed: false, byHand: true },
+    ])
+  })
+
+  test('drx remove leaves that line to the user too, and claims nothing', async () => {
+    const root = project(
+      { engine: 'ddev' },
+      {
+        'nuxt/nuxt.config.js': 'export default () => ({ modules: [] })\n',
+      }
+    )
+    const { calls, exec } = tools(root)
+    await drx(['add', 'blocks'], root, { exec })
+    calls.length = 0
+    const result = await drx(['remove', 'blocks'], root, { exec })
+    expect(result.code, result.stderr).toBe(0)
+    expect(calls).toEqual(['nuxt$ npm uninstall -- druxt-blocks'])
+    expect(result.stderr).not.toContain('before drx add')
+    expect(result.stdout).toBe(
+      [
+        'Removed blocks.',
+        '',
+        'Left to do:',
+        "  Remove 'druxt-blocks' from the modules array in nuxt.config.js, if you added it there. drx add could not edit the file and left that line to you, so it is yours to take out.",
+        '  The backend was left as it is. drx remove blocks --backend takes out what drx add put in drupal/: block.',
+        '',
+      ].join('\n')
+    )
+  })
+
+  test('a second add keeps the line left to the user on the record', async () => {
+    const root = project(
+      { engine: 'ddev' },
+      {
+        'nuxt/nuxt.config.js': 'export default () => ({ modules: [] })\n',
+      }
+    )
+    const { exec } = tools(root)
+    await drx(['add', 'blocks'], root, { exec })
+    await drx(['add', 'blocks'], root, { exec })
+    expect(config(root).modules[0].frontend).toEqual([
+      { path: 'nuxt', installed: true, listed: false, byHand: true },
+    ])
   })
 })
 
@@ -496,6 +580,7 @@ describe('drx add when the backend is not run from here', () => {
         '    composer require -- cweagans/composer-patches:^2.0@beta',
         '    composer patches-relock',
         '    composer require -- drupal/decoupled_router',
+        '    drush cr',
         '    drush en -y -- decoupled_router',
         '',
       ].join('\n')
@@ -619,6 +704,7 @@ describe('drx add when a tool fails', () => {
         '  drupal/: ddev composer patches-relock',
         'Not done:',
         '  drupal/: ddev composer require -- drupal/decoupled_router',
+        '  drupal/: ddev drush cr',
         '  drupal/: ddev drush en -y -- decoupled_router',
       ].join('\n')
     )
@@ -640,6 +726,7 @@ describe('drx add when a tool fails', () => {
                 module: 'decoupled_router',
               },
             ],
+            patcher: ADDED_PLUGIN,
           },
         ],
       },
@@ -690,6 +777,7 @@ describe('telling core from contributed with the published registry', () => {
     expect(result.code).toBe(0)
     expect(calls.slice(1)).toEqual([
       'drupal$ ddev composer require -- drupal/jsonapi_menu_items',
+      'drupal$ ddev drush cr',
       'drupal$ ddev drush en -y -- jsonapi_menu_items menu_link_content',
     ])
   })
@@ -808,14 +896,66 @@ describe('drx remove', () => {
       'drupal$ ddev drush pmu -y -- decoupled_router',
       'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
       'drupal$ ddev composer patches-relock',
+      'drupal$ ddev composer remove -- cweagans/composer-patches',
+      'drupal$ ddev drush cr',
     ])
     const composer = JSON.parse(
       readFileSync(join(root, 'drupal/composer.json'), 'utf8')
     )
     // The patches were all that was under `extra`, so it went with them.
     expect(composer.extra).toBeUndefined()
+    // The plugin drx add brought went with the last patch.
+    expect(composer).toEqual({ require: { 'drupal/core-recommended': '~11' } })
+    expect(existsSync(join(root, 'drupal/patches.lock.json'))).toBe(false)
     expect(config(root).modules).toBeUndefined()
     expect(result.stdout).toBe('Removed breadcrumb.\n')
+  })
+
+  test('--backend changes nothing of a module the backend gives two answers about', async () => {
+    const root = await added()
+    const record = config(root).modules
+    const composer = readFileSync(join(root, 'drupal/composer.json'), 'utf8')
+    // The list has the module enabled, and the container does not know it.
+    const backend = { ...ENABLED, stale: ['decoupled_router'] }
+    const { calls, exec, enabled } = tools(root, undefined, backend)
+    const result = await drx(['remove', 'breadcrumb', '--backend'], root, {
+      exec,
+    })
+    expect(result.code, result.stderr).toBe(0)
+    expect(calls).toEqual(['nuxt$ npm uninstall -- druxt-breadcrumb'])
+    expect(result.stderr).not.toContain('is not enabled')
+    expect(result.stdout).toBe(
+      [
+        'Removed breadcrumb.',
+        '',
+        'Left to do:',
+        '  The backend gave two answers about whether decoupled_router is enabled, so it was left as it is. Rebuild its caches with drush cr and run this again, or once nothing depends on it: drush pm:uninstall decoupled_router, then composer remove drupal/decoupled_router',
+        '',
+      ].join('\n')
+    )
+    // The module is still enabled and required, and the record still says
+    // that drx add enabled it.
+    expect([...enabled]).toEqual(['decoupled_router'])
+    expect(readFileSync(join(root, 'drupal/composer.json'), 'utf8')).toBe(
+      composer
+    )
+    expect(config(root).modules).toEqual([{ ...record[0], frontend: [] }])
+
+    // Once the caches are rebuilt, the same command finishes the job.
+    await exec('ddev', ['drush', 'cr'], { cwd: join(root, 'drupal') })
+    calls.length = 0
+    const again = await drx(['remove', 'breadcrumb', '--backend'], root, {
+      exec,
+    })
+    expect(again.code, again.stderr).toBe(0)
+    expect(calls).toEqual([
+      'drupal$ ddev drush pmu -y -- decoupled_router',
+      'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
+      'drupal$ ddev composer patches-relock',
+      'drupal$ ddev composer remove -- cweagans/composer-patches',
+      'drupal$ ddev drush cr',
+    ])
+    expect(config(root).modules).toBeUndefined()
   })
 
   test('--backend keeps a backend module another installed module needs', async () => {
@@ -857,6 +997,10 @@ describe('drx remove', () => {
         '    edit  Remove 1 patch from composer.json',
         '    run   ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
         '    run   ddev composer patches-relock',
+        '    run   ddev composer remove -- cweagans/composer-patches',
+        '    edit  Remove cweagans/composer-patches from allow-plugins in composer.json',
+        '    edit  Delete patches.lock.json',
+        '    run   ddev drush cr',
         '',
         'Nothing was changed: this was a dry run.',
         '',
@@ -893,6 +1037,7 @@ describe('what drx add records', () => {
     expect(calls).toEqual([
       'nuxt$ npm install -- druxt-router',
       'drupal$ ddev composer require -- drupal/decoupled_router',
+      'drupal$ ddev drush cr',
     ])
     expect(result.stderr).toContain('decoupled_router is already enabled.')
     expect(config(root).modules).toEqual([
@@ -968,6 +1113,7 @@ describe('what drx add records', () => {
       'nuxt$ npm uninstall -- druxt-router',
       'drupal$ ddev drush pmu -y -- decoupled_router',
       'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
+      'drupal$ ddev drush cr',
     ])
     expect(config(root).modules).toBeUndefined()
   })
@@ -1002,6 +1148,7 @@ describe('what drx add records', () => {
     expect(calls).toEqual([
       'drupal$ ddev drush pmu -y -- decoupled_router',
       'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
+      'drupal$ ddev drush cr',
     ])
     expect(result.stdout).toContain(
       'The record does not say whether drx add installed druxt-router, so it was left. To take it out: npm uninstall druxt-router.'
@@ -1166,6 +1313,7 @@ describe('drx remove --backend and what the backend still needs', () => {
       'nuxt$ npm uninstall -- druxt-router',
       'drupal$ ddev drush pmu -y -- decoupled_router path_alias',
       'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
+      'drupal$ ddev drush cr',
     ])
     expect(config(root).modules).toBeUndefined()
   })
@@ -1237,6 +1385,7 @@ describe('drx remove --backend and what the backend still needs', () => {
                 module: 'decoupled_router',
               },
             ],
+            patcher: ADDED_PLUGIN,
           },
         ],
       },
@@ -1250,10 +1399,13 @@ describe('drx remove --backend and what the backend still needs', () => {
       'drupal$ ddev drush pmu -y -- decoupled_router',
       'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
       'drupal$ ddev composer patches-relock',
+      // The plugin came with breadcrumb's patch, and goes with it here.
+      'drupal$ ddev composer remove -- cweagans/composer-patches',
+      'drupal$ ddev drush cr',
     ])
     expect(
-      JSON.parse(readFileSync(join(root, 'drupal/composer.json'), 'utf8')).extra
-    ).toBeUndefined()
+      JSON.parse(readFileSync(join(root, 'drupal/composer.json'), 'utf8'))
+    ).toEqual({ require: { 'drupal/core-recommended': '~11' } })
     expect(config(root).modules).toBeUndefined()
   })
 })
@@ -1289,6 +1441,7 @@ describe('drx add with no backend to look in', () => {
         '  drupal/',
         '    The backend of this project is not on this machine. Where it is:',
         '      composer require -- drupal/jsonapi_menu_items drupal/menu_link_content',
+        '      drush cr',
         '      drush en -y -- jsonapi_menu_items menu_link_content',
         '',
         'Left to do:',
@@ -1384,6 +1537,7 @@ describe('the JSON of a step that failed', () => {
         ],
         notDone: [
           'drupal/: ddev composer require -- drupal/decoupled_router',
+          'drupal/: ddev drush cr',
           'drupal/: ddev drush en -y -- decoupled_router',
         ],
       },
@@ -1442,6 +1596,9 @@ const withPlugin = () =>
           null,
           4
         ) + '\n',
+      // The plugin keeps a lock file from the day it is installed.
+      'drupal/patches.lock.json':
+        JSON.stringify({ patches: [] }, null, 4) + '\n',
     }
   )
 
@@ -1510,7 +1667,8 @@ describe('several modules in one run', () => {
         name: 'alpha',
         package: 'druxt-alpha',
         frontend: [{ path: 'nuxt', installed: true, listed: true }],
-        backend: [backendRecord('alpha')],
+        // The first to need a patch brought the plugin that applies them.
+        backend: [{ ...backendRecord('alpha'), patcher: ADDED_PLUGIN }],
       },
       {
         name: 'beta',
@@ -1552,6 +1710,59 @@ describe('several modules in one run', () => {
     expect(files(root)).toEqual(before)
   })
 
+  test.each([[['alpha', 'beta']], [['beta', 'alpha']]])(
+    'the plugin drx add brought goes with the last patch, removing %j in turn',
+    async (order) => {
+      const root = project()
+      const before = files(root)
+      const { calls, exec } = tools(root)
+      const overrides = { exec, ...registryOf(PAIR) }
+      await drx(['add', 'alpha', 'beta'], root, overrides)
+      expect(json(root, 'drupal/composer.json').require).toHaveProperty(PLUGIN)
+
+      const [first, second] = order as [string, string]
+      calls.length = 0
+      await drx(['remove', first, '--backend'], root, overrides)
+      // A patch is left, so the plugin is, on the record of that module.
+      expect(calls.join('\n')).not.toContain(`-- ${PLUGIN}`)
+      expect(json(root, 'drupal/composer.json').require).toHaveProperty(PLUGIN)
+      expect(json(root, 'drx.config.json').modules).toEqual([
+        {
+          name: second,
+          package: `druxt-${second}`,
+          frontend: [{ path: 'nuxt', installed: true, listed: true }],
+          backend: [{ ...backendRecord(second), patcher: ADDED_PLUGIN }],
+        },
+      ])
+
+      calls.length = 0
+      const last = await drx(['remove', second, '--backend'], root, overrides)
+      expect(last.code, last.stderr).toBe(0)
+      expect(calls.slice(-2)).toEqual([
+        `drupal$ ddev composer remove -- ${PLUGIN}`,
+        'drupal$ ddev drush cr',
+      ])
+      expect(json(root, 'drx.config.json').modules).toBeUndefined()
+      expect(files(root)).toEqual(before)
+    }
+  )
+
+  test('a plugin the site had stays when the last patch goes', async () => {
+    const root = withPlugin()
+    const { calls, exec } = tools(root)
+    const overrides = { exec, ...registryOf(PAIR) }
+    await drx(['add', 'alpha'], root, overrides)
+    expect(json(root, 'drx.config.json').modules[0].backend[0]).toEqual(
+      backendRecord('alpha')
+    )
+    await drx(['remove', 'alpha', '--backend'], root, overrides)
+    expect(calls.join('\n')).not.toContain(`-- ${PLUGIN}`)
+    const composer = json(root, 'drupal/composer.json')
+    expect(composer.require).toHaveProperty(PLUGIN)
+    expect(composer.config['allow-plugins']).toEqual({ [PLUGIN]: true })
+    expect(existsSync(join(root, 'drupal/patches.lock.json'))).toBe(true)
+  })
+
   test('a backend module two of them need is done once, by the first', async () => {
     const root = project()
     const { calls, exec } = tools(root)
@@ -1563,7 +1774,9 @@ describe('several modules in one run', () => {
       'drupal$ ddev drush en -y -- mod_alpha',
     ])
     const [alpha, gamma] = json(root, 'drx.config.json').modules
-    expect(alpha.backend).toEqual([backendRecord('alpha')])
+    expect(alpha.backend).toEqual([
+      { ...backendRecord('alpha'), patcher: ADDED_PLUGIN },
+    ])
     expect(gamma.backend).toEqual([])
 
     calls.length = 0
@@ -1620,6 +1833,7 @@ describe('drx add when a tool fails part way', () => {
               module: 'decoupled_router',
             },
           ],
+          patcher: ADDED_PLUGIN,
         },
       ],
     },
@@ -1683,6 +1897,47 @@ describe('drx add when a tool fails part way', () => {
     expect(files(root)).toEqual(files(clean))
   })
 
+  test('a second run locks and applies a patch the first could not lock', async () => {
+    // The package is installed already: another package brought it in.
+    const there = {
+      'drupal/vendor/composer/installed.json': {
+        packages: [{ name: 'drupal/decoupled_router', version: '2.0.7' }],
+      },
+    }
+    const clean = project({ engine: 'ddev' }, there)
+    await drx(['add', 'breadcrumb'], clean, { exec: tools(clean).exec })
+
+    const root = project({ engine: 'ddev' }, there)
+    const failed = await drx(['add', 'breadcrumb'], root, {
+      exec: tools(root, { on: 'patches-relock', output: 'HTTP 404' }).exec,
+    })
+    expect(failed.code).toBe(1)
+    expect(existsSync(join(root, 'drupal/patches.lock.json'))).toBe(false)
+
+    const { calls, exec } = tools(root)
+    const again = await drx(['add', 'breadcrumb'], root, { exec })
+    expect(again.code, again.stderr).toBe(0)
+    expect(again.stderr).toContain(
+      'The patch "Fix the redirect loop" is in composer.json and not in patches.lock.json, so the patches are locked again.'
+    )
+    expect(calls).toEqual([
+      'drupal$ ddev composer patches-relock',
+      'drupal$ ddev composer require -- drupal/decoupled_router',
+      'drupal$ ddev composer patches-repatch',
+      'drupal$ ddev drush cr',
+      'drupal$ ddev drush en -y -- decoupled_router',
+    ])
+    expect(config(root).modules).toEqual(config(clean).modules)
+    expect(files(root)).toEqual(files(clean))
+
+    // And a remove ends where the project started.
+    const removed = await drx(['remove', 'breadcrumb', '--backend'], root, {
+      exec,
+    })
+    expect(removed.code, removed.stderr).toBe(0)
+    expect(files(root)).toEqual(files(project({ engine: 'ddev' }, there)))
+  })
+
   test('a remove after the failure undoes what was done', async () => {
     const root = withPlugin()
     const before = files(root)
@@ -1698,6 +1953,7 @@ describe('drx add when a tool fails part way', () => {
       'nuxt$ npm uninstall -- druxt-breadcrumb',
       'drupal$ ddev composer remove --no-update-with-dependencies -- drupal/decoupled_router',
       'drupal$ ddev composer patches-relock',
+      'drupal$ ddev drush cr',
     ])
     expect(config(root).modules).toBeUndefined()
     expect(files(root)).toEqual(before)

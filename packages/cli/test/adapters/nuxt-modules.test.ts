@@ -341,6 +341,57 @@ describe('a config that cannot be edited safely', () => {
       "Add 'druxt-breadcrumb' to the modules array of the config. No config file was found.",
     ])
   })
+
+  const FUNCTION = 'export default () => ({ modules: [] })\n'
+  const BY_HAND = { installed: true, listed: false, byHand: true }
+
+  test('is recorded as left to the user, and not as listed', async () => {
+    const change = await add(part({ 'nuxt.config.js': FUNCTION }))
+    expect(change.did).toEqual(BY_HAND)
+    expect((await add(part({}))).did).toEqual(BY_HAND)
+    // A config that was edited has nothing left to the user.
+    const edited = await add(part({ 'nuxt.config.js': QUICKSTART }))
+    expect(edited.did).toEqual({ installed: true, listed: true })
+  })
+
+  test('has its line left to the user on a remove too, and claims nothing', async () => {
+    const dir = part({
+      'package.json': { dependencies: { 'druxt-breadcrumb': '^0.1.0' } },
+      'nuxt.config.js': FUNCTION,
+    })
+    const change = await remove(dir, 'druxt-breadcrumb', BY_HAND)
+    expect(runs(change)).toEqual([
+      { tool: 'npm', args: ['uninstall', '--', 'druxt-breadcrumb'] },
+    ])
+    expect(edits(change)).toEqual([])
+    expect(change.notes).toEqual([])
+    expect(change.manual).toEqual([
+      "Remove 'druxt-breadcrumb' from the modules array in nuxt.config.js, if you added it there. drx add could not edit the file and left that line to you, so it is yours to take out.",
+    ])
+  })
+
+  test('has its line left to the user when there is no config file either', async () => {
+    const change = await remove(part({}), 'druxt-breadcrumb', BY_HAND)
+    expect(change.manual).toEqual([
+      "Remove 'druxt-breadcrumb' from the modules array of the config, if you added it there. drx add found no config file and left that line to you, so it is yours to take out.",
+    ])
+  })
+
+  test('has nothing left to do once the config can be read and does not list it', async () => {
+    const dir = part({ 'nuxt.config.js': QUICKSTART })
+    const change = await remove(dir, 'druxt-breadcrumb', BY_HAND)
+    expect(change.manual).toEqual([])
+    expect(change.notes).toEqual([])
+  })
+
+  test('is not said to have been listed before when nothing can tell', async () => {
+    const dir = part({ 'nuxt.config.js': FUNCTION })
+    const change = await remove(dir, 'druxt-breadcrumb', {
+      installed: false,
+      listed: false,
+    })
+    expect(change.notes.join('\n')).not.toContain('before drx add')
+  })
 })
 
 describe('a package the part already has', () => {

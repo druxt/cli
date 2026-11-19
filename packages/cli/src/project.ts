@@ -70,6 +70,7 @@ function moduleRecord(raw: Raw): ModuleRecord {
             path: String(entry.path),
             installed: entry.installed === true,
             listed: entry.listed === true,
+            ...(entry.byHand === true ? { byHand: true } : {}),
           })),
         }
       : {}),
@@ -89,6 +90,14 @@ function moduleRecord(raw: Raw): ModuleRecord {
         url: String(patch.url),
         ...(typeof patch.module === 'string' ? { module: patch.module } : {}),
       })),
+      ...(isRecord(entry.patcher)
+        ? {
+            patcher: {
+              required: entry.patcher.required === true,
+              allowed: entry.patcher.allowed === true,
+            },
+          }
+        : {}),
     })),
   }
 }

@@ -33,12 +33,17 @@ const need = (
 function answering(
   enabled: string[] = [],
   dependents: Record<string, string[]> = {},
-  paths: Record<string, string> = {}
+  paths: Record<string, string> = {},
+  /** What a simulated uninstall takes to be enabled, when that differs. */
+  cached: string[] = enabled,
+  /** False when the list of enabled modules cannot be had. */
+  lists = true
 ) {
   const asked: string[] = []
   const ask: Ask = async (tool, args) => {
     asked.push(`${tool} ${args.join(' ')}`)
     if (args[0] === 'pm:list') {
+      if (!lists) return { code: 1, output: 'No list.' }
       const list = Object.fromEntries(
         enabled.map((name) => [
           name,
@@ -48,7 +53,7 @@ function answering(
       return { code: 0, output: JSON.stringify(list) }
     }
     const name = args.at(-1) as string
-    if (!enabled.includes(name)) {
+    if (!cached.includes(name)) {
       return {
         code: 1,
         output: `The following module(s) are not installed: ${name}. No modules to uninstall.`,
@@ -134,6 +139,7 @@ describe('adding the backend modules a Druxt module needs', () => {
     const change = await add(site(), [need('decoupled_router')])
     expect(runs(change)).toEqual([
       'composer require -- drupal/decoupled_router',
+      'drush cr',
       'drush en -y -- decoupled_router',
     ])
     expect(change.record).toEqual({
@@ -169,6 +175,7 @@ describe('adding the backend modules a Druxt module needs', () => {
     ])
     expect(runs(change)).toEqual([
       'composer require -- drupal/jsonapi_menu_items:^1.2',
+      'drush cr',
       'drush en -y -- menu_items views',
     ])
     expect(change.record?.modules).toEqual([
@@ -216,6 +223,7 @@ describe('adding the backend modules a Druxt module needs', () => {
     ])
     expect(runs(change)).toEqual([
       'composer require -- drupal/decoupled_router',
+      'drush cr',
     ])
     expect(change.notes).toEqual([
       'decoupled_router is already enabled.',
@@ -331,6 +339,7 @@ describe('telling a core module from a contributed one when the registry does no
     )
     expect(runs(change)).toEqual([
       'composer require -- drupal/decoupled_router',
+      'drush cr',
       'drush en -y -- jsonapi decoupled_router',
     ])
   })
@@ -412,6 +421,7 @@ describe('the patches a backend module needs', () => {
       `composer require -- ${PLUGIN}:^2.0@beta`,
       'composer patches-relock',
       'composer require -- drupal/decoupled_router',
+      'drush cr',
       'drush en -y -- decoupled_router',
     ])
     expect(change.record?.patches).toEqual([
@@ -455,6 +465,7 @@ describe('the patches a backend module needs', () => {
       'composer patches-relock',
       'composer require -- drupal/decoupled_router',
       'composer patches-repatch',
+      'drush cr',
       'drush en -y -- decoupled_router',
     ])
   })
@@ -524,16 +535,27 @@ describe('the patches a backend module needs', () => {
   })
 
   test('skip one the site already carries, and do not record it', async () => {
-    const dir = site({
-      require: { 'drupal/core-recommended': '~11', [PLUGIN]: '^2.0' },
-      extra: {
-        patches: {
-          'drupal/decoupled_router': {
-            Theirs: 'https://example.com/mr/12.diff',
+    const dir = site(
+      {
+        require: { 'drupal/core-recommended': '~11', [PLUGIN]: '^2.0' },
+        extra: {
+          patches: {
+            'drupal/decoupled_router': {
+              Theirs: 'https://example.com/mr/12.diff',
+            },
           },
         },
       },
-    })
+      {
+        'patches.lock.json': {
+          patches: {
+            'drupal/decoupled_router': [
+              { description: 'Theirs', url: 'https://example.com/mr/12.diff' },
+            ],
+          },
+        },
+      }
+    )
     const change = await add(dir, [
       patched({
         patches: [
@@ -551,11 +573,168 @@ describe('the patches a backend module needs', () => {
     )
   })
 
+  describe('one that composer.json already lists', () => {
+    const ONE = {
+      description: 'Fix the redirect loop',
+      url: 'https://example.com/mr/12.diff',
+    }
+    const listing = {
+      require: { 'drupal/core-recommended': '~11', [PLUGIN]: '^2.0@beta' },
+      extra: {
+        patches: { 'drupal/decoupled_router': { [ONE.description]: ONE.url } },
+      },
+    }
+    const LOCKED = {
+      'patches.lock.json': {
+        patches: { 'drupal/decoupled_router': [{ ...ONE, depth: 1 }] },
+      },
+    }
+    const INSTALLED = (extra: Record<string, unknown> = {}) => ({
+      'vendor/composer/installed.json': {
+        packages: [
+          { name: 'drupal/decoupled_router', version: '2.0.7', ...extra },
+        ],
+      },
+    })
+    const again = (dir: string) => add(dir, [patched({ patches: [ONE] })])
+
+    test('is locked and applied when the lock file does not have it', async () => {
+      // An earlier run wrote the patch and stopped before it was locked.
+      const change = await again(site(listing, INSTALLED()))
+      expect(edit(change)).toBeUndefined()
+      expect(runs(change)).toEqual([
+        'composer patches-relock',
+        'composer require -- drupal/decoupled_router',
+        'composer patches-repatch',
+        'drush cr',
+        'drush en -y -- decoupled_router',
+      ])
+      expect(change.notes).toContain(
+        'The patch "Fix the redirect loop" is in composer.json and not in patches.lock.json, so the patches are locked again.'
+      )
+      expect(change.notes).not.toContain(
+        'The patch "Fix the redirect loop" is already in composer.json.'
+      )
+      // It was written by the run before, whose record has it.
+      expect(change.record?.patches).toEqual([])
+    })
+
+    test('is locked with an empty lock file as well', async () => {
+      const dir = site(listing, { 'patches.lock.json': { patches: [] } })
+      expect(runs(await again(dir))).toEqual([
+        'composer patches-relock',
+        'composer require -- drupal/decoupled_router',
+        'drush cr',
+        'drush en -y -- decoupled_router',
+      ])
+    })
+
+    test('gets the plugin first when that is what the earlier run stopped at', async () => {
+      const dir = site({
+        extra: listing.extra,
+        config: { 'allow-plugins': { [PLUGIN]: true } },
+      })
+      const change = await again(dir)
+      expect(edit(change)).toBeUndefined()
+      expect(runs(change).slice(0, 2)).toEqual([
+        `composer require -- ${PLUGIN}:^2.0@beta`,
+        'composer patches-relock',
+      ])
+      expect(change.record?.patcher).toEqual({ required: true, allowed: false })
+    })
+
+    test('has the plugin allowed again when the site no longer allows it', async () => {
+      const dir = site({ extra: listing.extra })
+      const change = await again(dir)
+      expect(edit(change)?.summary).toBe(`Allow ${PLUGIN} in composer.json`)
+      const written = JSON.parse(edit(change)?.content ?? '{}')
+      expect(written.config['allow-plugins']).toEqual({ [PLUGIN]: true })
+      expect(written.extra).toEqual(listing.extra)
+    })
+
+    test('is installed again on a package nothing says it was applied to', async () => {
+      const dir = site(
+        {
+          ...listing,
+          require: { ...listing.require, 'drupal/decoupled_router': '^2.0' },
+        },
+        { ...LOCKED, ...INSTALLED() }
+      )
+      const change = await again(dir)
+      expect(runs(change)).toEqual([
+        'composer reinstall -- drupal/decoupled_router',
+        'drush en -y -- decoupled_router',
+      ])
+      expect(change.notes).toContain(
+        'The patch "Fix the redirect loop" is locked, and nothing on the site says drupal/decoupled_router was installed with it, so the package is installed again.'
+      )
+    })
+
+    test('is left alone once it is locked and the package says it is applied', async () => {
+      const dir = site(listing, {
+        ...LOCKED,
+        ...INSTALLED({
+          extra: { patches_applied: { [ONE.description]: ONE.url } },
+        }),
+      })
+      const change = await again(dir)
+      expect(runs(change)).toEqual([
+        'composer require -- drupal/decoupled_router',
+        'drush cr',
+        'drush en -y -- decoupled_router',
+      ])
+      expect(change.notes).toContain(
+        'The patch "Fix the redirect loop" is already in composer.json.'
+      )
+    })
+
+    test('is left alone once it is locked, for a package still to install', async () => {
+      const change = await again(site(listing, LOCKED))
+      expect(runs(change)).toEqual([
+        'composer require -- drupal/decoupled_router',
+        'drush cr',
+        'drush en -y -- decoupled_router',
+      ])
+    })
+  })
+
+  describe('the plugin that applies them', () => {
+    test('is recorded as added, with its permission, on a site without it', async () => {
+      const change = await add(site(), [patched()])
+      expect(change.record?.patcher).toEqual({ required: true, allowed: true })
+      // Each step says its own part, for a run that stops between them.
+      expect(change.steps.map((step) => step.record?.patcher)).toEqual([
+        { required: false, allowed: true },
+        { required: true, allowed: false },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+      ])
+    })
+
+    test('is recorded without the permission where every plugin is allowed', async () => {
+      const dir = site({ config: { 'allow-plugins': true } })
+      const change = await add(dir, [patched()])
+      expect(change.record?.patcher).toEqual({ required: true, allowed: false })
+    })
+
+    test('is not recorded on a site that had it', async () => {
+      const dir = site({
+        require: { 'drupal/core-recommended': '~11', [PLUGIN]: '^2.0' },
+      })
+      const change = await add(dir, [patched()])
+      expect(change.record).not.toHaveProperty('patcher')
+      expect(change.steps.some((step) => step.record?.patcher)).toBe(false)
+    })
+  })
+
   test('are left out, with a warning, when patches are turned off', async () => {
     const change = await add(site(), [patched()], { patches: false })
     expect(edit(change)).toBeUndefined()
     expect(runs(change)).toEqual([
       'composer require -- drupal/decoupled_router',
+      'drush cr',
       'drush en -y -- decoupled_router',
     ])
     expect(change.warnings).toEqual([
@@ -582,6 +761,7 @@ describe('a backend that is not run from here', () => {
     expect(change.problems).toEqual([])
     expect(runs(change)).toEqual([
       'composer require -- drupal/jsonapi_menu_items drupal/menu_link_content',
+      'drush cr',
       'drush en -y -- jsonapi_menu_items menu_link_content',
     ])
     expect(change.manual).toEqual([
@@ -645,14 +825,17 @@ describe('taking backend modules out again', () => {
   test('uninstalls and removes what the record says was added', async () => {
     const { ask, asked } = answering([ROUTER, MENU])
     const change = await remove(carrying(), ask)
+    // Each module is asked about twice: the list is asked for once.
     expect(asked).toEqual([
       'drush pm:uninstall --simulate -- decoupled_router',
+      'drush pm:list --type=module --status=enabled --fields=name,path --format=json',
       'drush pm:uninstall --simulate -- jsonapi_menu_items',
     ])
     expect(runs(change)).toEqual([
       'drush pmu -y -- decoupled_router jsonapi_menu_items',
       'composer remove --no-update-with-dependencies -- drupal/decoupled_router drupal/jsonapi_menu_items',
       'composer patches-relock',
+      'drush cr',
     ])
     expect(JSON.parse(edit(change)?.content ?? '{}').extra.patches).toEqual({
       'drupal/decoupled_router': { 'Their own': 'patches/own.patch' },
@@ -667,6 +850,7 @@ describe('taking backend modules out again', () => {
     expect(runs(change)).toEqual([
       'drush pmu -y -- jsonapi_menu_items',
       'composer remove --no-update-with-dependencies -- drupal/jsonapi_menu_items',
+      'drush cr',
     ])
     expect(edit(change)).toBeUndefined()
     expect(change.notes).toEqual([
@@ -769,6 +953,7 @@ describe('taking backend modules out again', () => {
       const change = await remove(site({}, installed({})), ask, only)
       expect(runs(change)).toEqual([
         'composer remove --no-update-with-dependencies -- drupal/jsonapi_views',
+        'drush cr',
       ])
     })
   })
@@ -841,6 +1026,7 @@ describe('taking backend modules out again', () => {
       'composer remove --no-update-with-dependencies -- drupal/jsonapi_menu_items',
       'composer patches-relock',
       'composer reinstall -- drupal/decoupled_router',
+      'drush cr',
     ])
   })
 
@@ -889,6 +1075,286 @@ describe('taking backend modules out again', () => {
     expect(JSON.parse(edit(change)?.content ?? '{}').extra).toEqual({
       'drupal-scaffold': { locations: { 'web-root': 'web/' } },
     })
+  })
+
+  describe('a site whose two answers about a module differ', () => {
+    const LEFT =
+      'Rebuild its caches with drush cr and run this again, or once nothing depends on it: drush pm:uninstall decoupled_router, then composer remove drupal/decoupled_router'
+
+    test('keeps a module the list has enabled and a simulated uninstall does not', async () => {
+      // A cached container from before the module was enabled.
+      const { ask } = answering([ROUTER, MENU], {}, {}, [MENU])
+      const change = await remove(carrying(), ask)
+      expect(runs(change)).toEqual([
+        'drush pmu -y -- jsonapi_menu_items',
+        'composer remove --no-update-with-dependencies -- drupal/jsonapi_menu_items',
+        'drush cr',
+      ])
+      expect(change.notes).toEqual([])
+      expect(change.manual).toEqual([
+        `The backend gave two answers about whether decoupled_router is enabled, so it was left as it is. ${LEFT}`,
+      ])
+      expect(edit(change)).toBeUndefined()
+      // Nothing about it is rewritten: it is still one the add enabled.
+      expect(change.record).toEqual({
+        modules: [record.modules[0]],
+        patches: record.patches,
+      })
+    })
+
+    test('keeps a module a simulated uninstall has enabled and the list does not', async () => {
+      const { ask } = answering([MENU], {}, {}, [ROUTER, MENU])
+      const change = await remove(carrying(), ask)
+      expect(runs(change)[0]).toBe('drush pmu -y -- jsonapi_menu_items')
+      expect(change.manual).toEqual([
+        `The backend gave two answers about whether decoupled_router is enabled, so it was left as it is. ${LEFT}`,
+      ])
+      expect(change.record?.modules).toEqual([record.modules[0]])
+    })
+
+    test('keeps every module when the list cannot be had', async () => {
+      const { ask } = answering([ROUTER, MENU], {}, {}, [MENU], false)
+      const change = await remove(carrying(), ask)
+      expect(change.steps).toEqual([])
+      expect(change.manual[0]).toBe(
+        `The backend could not say whether decoupled_router is enabled, so it was left as it is. ${LEFT}`
+      )
+      expect(change.record).toEqual(record)
+    })
+
+    test('keeps the requirement of a module the site had enabled', async () => {
+      const only: BackendRecord = {
+        modules: [
+          {
+            name: 'jsonapi_views',
+            package: 'drupal/jsonapi_views',
+            enabled: false,
+            required: true,
+          },
+        ],
+        patches: [],
+      }
+      // The list says it is off now, and a simulated uninstall that it is on.
+      const { ask } = answering([], {}, {}, ['jsonapi_views'])
+      const change = await remove(site(), ask, only)
+      expect(change.steps).toEqual([])
+      expect(change.record).toEqual(only)
+    })
+  })
+
+  describe('the plugin that applies patches', () => {
+    const added: BackendRecord = {
+      ...record,
+      patcher: { required: true, allowed: true },
+    }
+    const patchedSite = (
+      extra: Record<string, unknown> = {},
+      files: Record<string, unknown> = {}
+    ) =>
+      site(
+        {
+          require: {
+            'drupal/core-recommended': '~11',
+            [PLUGIN]: '^2.0@beta',
+            'drupal/decoupled_router': '^2.0',
+          },
+          config: {
+            'sort-packages': true,
+            'allow-plugins': { 'composer/installers': true, [PLUGIN]: true },
+          },
+          extra: {
+            patches: {
+              'drupal/decoupled_router': {
+                'Fix the redirect loop': 'https://example.com/mr/12.diff',
+              },
+            },
+          },
+          ...extra,
+        },
+        files
+      )
+    /** Each edit of a change, made of what the edit before it wrote. */
+    const edited = (change: ModuleChange) => {
+      const file = join(sites.get(change) as string, 'composer.json')
+      let source = readFileSync(file, 'utf8')
+      return change.steps.flatMap((step) => {
+        if (!('edit' in step)) return []
+        source = step.edit.change(source)
+        return [{ summary: step.edit.summary, json: JSON.parse(source) }]
+      })
+    }
+
+    test('goes with the last patch when the record says the add put it there', async () => {
+      const change = await remove(
+        patchedSite(),
+        answering([ROUTER, MENU]).ask,
+        added
+      )
+      expect(runs(change)).toEqual([
+        'drush pmu -y -- decoupled_router jsonapi_menu_items',
+        'composer remove --no-update-with-dependencies -- drupal/decoupled_router drupal/jsonapi_menu_items',
+        'composer patches-relock',
+        `composer remove -- ${PLUGIN}`,
+        'drush cr',
+      ])
+      // The permission goes once the plugin has, or Composer would stop it.
+      const kinds = change.steps.map((step) => Object.keys(step)[0])
+      expect(kinds).toEqual([
+        'run',
+        'edit',
+        'run',
+        'run',
+        'run',
+        'edit',
+        'remove',
+        'run',
+      ])
+      const [patches, permission] = edited(change)
+      expect(patches?.summary).toBe('Remove 1 patch from composer.json')
+      expect(patches?.json.config['allow-plugins'][PLUGIN]).toBe(true)
+      expect(permission?.summary).toBe(
+        `Remove ${PLUGIN} from allow-plugins in composer.json`
+      )
+      expect(permission?.json.config).toEqual({
+        'sort-packages': true,
+        'allow-plugins': { 'composer/installers': true },
+      })
+      expect(change.record).toBeUndefined()
+    })
+
+    test('takes its lock file with it once that holds no patch', async () => {
+      const change = await remove(
+        patchedSite(),
+        answering([ROUTER, MENU]).ask,
+        added
+      )
+      const removal = change.steps.flatMap((step) =>
+        'remove' in step ? [step.remove] : []
+      )[0]
+      expect(removal?.file).toBe('patches.lock.json')
+      expect(removal?.summary).toBe('Delete patches.lock.json')
+      expect(removal?.when('{"_hash": "x", "patches": []}')).toBe(true)
+      expect(removal?.when('{"patches": {}}')).toBe(true)
+      expect(removal?.when('{"patches": {"a/b": [{"url": "x"}]}}')).toBe(false)
+      expect(removal?.when('not json')).toBe(false)
+    })
+
+    test('takes an allow-plugins it leaves empty, and a config that leaves empty', async () => {
+      const dir = patchedSite({
+        config: { 'allow-plugins': { [PLUGIN]: true } },
+      })
+      const change = await remove(dir, answering([ROUTER, MENU]).ask, added)
+      expect(edited(change)[1]?.json.config).toBeUndefined()
+    })
+
+    test('stays while composer.json has another patch, and stays on the record', async () => {
+      const dir = patchedSite({
+        extra: {
+          patches: {
+            'drupal/decoupled_router': {
+              'Fix the redirect loop': 'https://example.com/mr/12.diff',
+            },
+            'drupal/druxt': { 'Their own': 'patches/own.patch' },
+          },
+        },
+      })
+      const change = await remove(dir, answering([ROUTER, MENU]).ask, added)
+      expect(runs(change).join('\n')).not.toContain(PLUGIN)
+      expect(edited(change)).toHaveLength(1)
+      expect(change.record).toEqual({
+        modules: [],
+        patches: [],
+        patcher: added.patcher,
+      })
+    })
+
+    test('stays when the record does not say the add put it there', async () => {
+      const change = await remove(patchedSite(), answering([ROUTER, MENU]).ask)
+      expect(runs(change).join('\n')).not.toContain(PLUGIN)
+      expect(edited(change)).toHaveLength(1)
+      expect(change.steps.some((step) => 'remove' in step)).toBe(false)
+    })
+
+    test('keeps a permission the site had, and takes only the requirement', async () => {
+      const change = await remove(
+        patchedSite(),
+        answering([ROUTER, MENU]).ask,
+        {
+          ...record,
+          patcher: { required: true, allowed: false },
+        }
+      )
+      expect(runs(change)).toContain(`composer remove -- ${PLUGIN}`)
+      expect(edited(change)).toHaveLength(1)
+    })
+
+    test('keeps a requirement the site had, and takes only the permission', async () => {
+      const change = await remove(
+        patchedSite(),
+        answering([ROUTER, MENU]).ask,
+        {
+          ...record,
+          patcher: { required: false, allowed: true },
+        }
+      )
+      expect(runs(change).join('\n')).not.toContain(`-- ${PLUGIN}`)
+      expect(edited(change)[1]?.json.config['allow-plugins']).toEqual({
+        'composer/installers': true,
+      })
+      expect(change.steps.some((step) => 'remove' in step)).toBe(false)
+    })
+
+    test('comes out of composer.json alone while another package requires it', async () => {
+      const dir = patchedSite(
+        {},
+        {
+          'vendor/composer/installed.json': {
+            packages: [
+              { name: PLUGIN, version: '2.0.0' },
+              {
+                name: 'acme/tools',
+                version: '1.0.0',
+                require: { [PLUGIN]: '^2' },
+              },
+            ],
+          },
+        }
+      )
+      const change = await remove(dir, answering([ROUTER, MENU]).ask, added)
+      // Composer's remove fails on a package that is still installed.
+      expect(runs(change)).toEqual([
+        'drush pmu -y -- decoupled_router jsonapi_menu_items',
+        `composer remove --no-update -- ${PLUGIN}`,
+        'composer remove --no-update-with-dependencies -- drupal/decoupled_router drupal/jsonapi_menu_items',
+        'composer patches-relock',
+        'drush cr',
+      ])
+      // The plugin is still installed, and so its lock file stays.
+      expect(change.steps.some((step) => 'remove' in step)).toBe(false)
+    })
+
+    test('stays with a module that stays, whose patch it applies', async () => {
+      const { ask } = answering([ROUTER, MENU, 'druxt'], {
+        [ROUTER]: ['druxt'],
+      })
+      const change = await remove(patchedSite(), ask, added)
+      expect(runs(change).join('\n')).not.toContain(PLUGIN)
+      expect(change.record?.patcher).toEqual(added.patcher)
+    })
+  })
+
+  test('rebuilds the caches after Composer has changed what is installed', async () => {
+    const change = await remove(carrying(), answering([ROUTER, MENU]).ask)
+    expect(runs(change).at(-1)).toBe('drush cr')
+    // Nothing installed changes when only the manifest does.
+    const kept = await remove(
+      carrying(),
+      answering([ROUTER, MENU, 'druxt'], {
+        [ROUTER]: ['druxt'],
+        [MENU]: ['druxt'],
+      }).ask
+    )
+    expect(runs(kept)).toEqual([])
   })
 
   test('does nothing with no record', async () => {
