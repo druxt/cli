@@ -347,17 +347,18 @@ A registry is a URL that answers `/<name>.json` for each starter, in the format 
 
 An entry in `engines` has:
 
-| Key         | What it holds                                                                                                      |
-| ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| `name`      | The name `--engine` takes. Lower case. `none` is taken                                                             |
-| `label`     | The engine's name as the prompt shows it                                                                           |
-| `needs`     | Optional. What the engine needs on the machine, printed under "It needs". The label when absent                    |
-| `commands`  | The commands the engine needs on `PATH`, as bare names                                                             |
-| `databases` | Optional. The databases it can be set up with, the default first                                                   |
-| `steps`     | What to run in the new site, in order. A step is a command, or `{ "run", "dir" }` for a command run in a directory |
-| `notes`     | Optional. What to do by hand, printed after the steps                                                              |
-| `files`     | Optional. Paths in the starter that the engine needs, relative to its root                                         |
-| `baseUrl`   | Optional. The URL the engine serves the backend at, when it is fixed                                               |
+| Key         | What it holds                                                                                                                                                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`      | The name `--engine` takes. Lower case. `none` is taken                                                                                                                                                                                  |
+| `label`     | The engine's name as the prompt shows it                                                                                                                                                                                                |
+| `needs`     | Optional. What the engine needs on the machine, printed under "It needs". The label when absent                                                                                                                                         |
+| `commands`  | The commands the engine needs on `PATH`, as bare names                                                                                                                                                                                  |
+| `databases` | Optional. The databases it can be set up with, the default first                                                                                                                                                                        |
+| `steps`     | What to run in the new site, in order. A step is a command, or `{ "run", "dir" }` for a command run in a directory                                                                                                                      |
+| `notes`     | Optional. What to do by hand, printed after the steps                                                                                                                                                                                   |
+| `files`     | Optional. Paths in the starter that the engine needs, relative to its root                                                                                                                                                              |
+| `baseUrl`   | Optional. The URL the engine serves the backend at, when it is fixed                                                                                                                                                                    |
+| `project`   | Optional. `{ "name", "files" }`: the project name the starter has, and the files that hold it. `init` writes a name made from the site's directory in its place, there and in `baseUrl`, so two sites from one starter are two projects |
 
 `init` removes the `files` of the engines that were not chosen. A path that two engines list is kept when either is chosen, and a directory that holds a kept path loses the rest of its contents. An absolute path, or one that leaves the starter, is refused when the entry is read, and again before anything is removed, which also stops a link in the starter from leading outside the site.
 

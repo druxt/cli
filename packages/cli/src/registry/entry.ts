@@ -52,6 +52,12 @@ export interface StarterEngine {
   files?: string[]
   /** The URL the engine serves the backend at, when it is fixed. */
   baseUrl?: string
+  /**
+   * The project name the starter ships with, and the files that hold it.
+   * `init` writes a name made from the site's directory in its place, there
+   * and in `baseUrl`, so two sites from one starter are two projects.
+   */
+  project?: { name: string; files: string[] }
 }
 
 /** Where a starter reads the URL of its backend from. */
@@ -213,6 +219,24 @@ function enginesProblem(value: unknown): string | undefined {
     }
     if (engine.baseUrl !== undefined && !isHttpUrl(engine.baseUrl)) {
       return `${at}.baseUrl must be an http or https URL`
+    }
+    const project = engine.project
+    if (project !== undefined) {
+      if (!isRecord(project)) return `${at}.project must be an object`
+      if (
+        typeof project.name !== 'string' ||
+        !/^[a-z0-9][a-z0-9-]*$/.test(project.name)
+      ) {
+        return `${at}.project.name must be a lower-case name`
+      }
+      if (!Array.isArray(project.files)) {
+        return `${at}.project.files must be an array of paths`
+      }
+      for (const [position, file] of project.files.entries()) {
+        if (!isInsidePath(file)) {
+          return `${at}.project.files[${position}] ${INSIDE}`
+        }
+      }
     }
     if (engine.files !== undefined) {
       if (!Array.isArray(engine.files)) {

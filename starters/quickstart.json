@@ -69,7 +69,11 @@
         "notes": [
           "ddev druxt-add-consumer prints OAUTH_CLIENT_ID. Copy it into .env before npm run dev."
         ],
-        "files": ["drupal/.ddev"]
+        "files": ["drupal/.ddev"],
+        "project": {
+          "name": "quickstart-druxtsite",
+          "files": ["drupal/.ddev/config.yaml"]
+        }
       },
       {
         "name": "lando",
@@ -96,7 +100,12 @@
         "notes": [
           "lando druxt-add-consumer prints OAUTH_CLIENT_ID. Copy it into .env before npm run dev."
         ],
-        "files": ["drupal/.lando.yml", "drupal/.ddev/commands"]
+        "files": ["drupal/.lando.yml", "drupal/.ddev/commands"],
+        "project": {
+          "name": "druxt-quickstart",
+          "files": ["drupal/.lando.yml"]
+        },
+        "needs": "Docker, and a Lando that has the drupal11 recipe"
       }
     ],
     "install": {
