@@ -208,6 +208,45 @@ describe('drx init --engine', () => {
     )
   })
 
+  // A backend that exists already is set up by nobody here, so the starter says what it still needs from it.
+  test('prints what the starter needs from a backend that exists already', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      druxt.existingBackend = {
+        notes: [
+          'Set OAUTH_CLIENT_ID in .env to the client ID of a consumer on that backend.',
+        ],
+      }
+    })
+    const result = await init([
+      '--yes',
+      '--engine',
+      'none',
+      '--base-url',
+      'https://example.com',
+      '--json',
+    ])
+    expect(JSON.parse(result.stdout).notes).toContain(
+      'Set OAUTH_CLIENT_ID in .env to the client ID of a consumer on that backend.'
+    )
+    const local = await run(
+      [
+        'init',
+        'local',
+        '--yes',
+        '--engine',
+        'php',
+        '--json',
+        '--registry',
+        registry.url,
+      ],
+      { cwd, nodeVersion: '16.18.1', findCommand: everything }
+    )
+    expect(JSON.parse(local.stdout).notes.join(' ')).not.toContain(
+      'OAUTH_CLIENT_ID'
+    )
+  })
+
   test('prints what the engine needs, its steps and its notes', async () => {
     const result = await init(['--yes', '--engine', 'ddev'])
     expect(result.stdout).toBe(

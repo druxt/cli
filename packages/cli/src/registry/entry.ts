@@ -95,6 +95,8 @@ export interface StarterDetails {
   backendUrl?: BackendUrlTarget
   /** What the install of the site's package manager does past installing. */
   install?: StarterInstall
+  /** What the starter still needs from a backend that exists already. */
+  existingBackend?: { notes?: string[] }
 }
 
 export interface StarterInstall {
@@ -337,6 +339,13 @@ function entryProblem(entry: unknown): string | undefined {
       if (done.contains !== undefined && !isStringArray(done.contains)) {
         return 'druxt.install.done.contains must be an array of strings'
       }
+    }
+  }
+  const existing = druxt.existingBackend
+  if (existing !== undefined) {
+    if (!isRecord(existing)) return 'druxt.existingBackend must be an object'
+    if (existing.notes !== undefined && !isStringArray(existing.notes)) {
+      return 'druxt.existingBackend.notes must be an array of strings'
     }
   }
   return enginesProblem(druxt.engines) ?? backendUrlProblem(druxt.backendUrl)

@@ -482,6 +482,8 @@ An entry in `engines` has:
 | `baseUrl`   | Optional. The URL the engine serves the backend at, when it is fixed                                                                                                                                                                    |
 | `project`   | Optional. `{ "name", "files" }`: the project name the starter has, and the files that hold it. `init` writes a name made from the site's directory in its place, there and in `baseUrl`, so two sites from one starter are two projects |
 
+A starter can also say what it still needs from a backend that exists already, in `druxt.existingBackend.notes`. `init` prints those lines when the `none` engine is chosen.
+
 `init` removes the `files` of the engines that were not chosen. A path that two engines list is kept when either is chosen, and a directory that holds a kept path loses the rest of its contents. An absolute path, or one that leaves the starter, is refused when the entry is read, and again before anything is removed, which also stops a link in the starter from leading outside the site.
 
 `init` looks each of the chosen engine's commands up on `PATH` without running it. On Windows it tries the extensions in `PATHEXT`. When one is missing it prints one warning and still creates the site:

@@ -171,7 +171,7 @@ async function existingBackend(
     baseUrl,
     writeUrl: baseUrl,
     steps: entry.druxt.steps ?? [],
-    notes: [],
+    notes: entry.druxt.existingBackend?.notes ?? [],
     keep: [],
     remove: engines.flatMap((engine) => engine.files ?? []),
   }
