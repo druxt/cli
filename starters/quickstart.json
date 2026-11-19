@@ -40,7 +40,8 @@
         "databases": ["sqlite"],
         "steps": ["npm run setup", "npm run dev"],
         "notes": [
-          "This engine does not run on Windows itself. Use WSL2 there, or another engine."
+          "This engine does not run on Windows itself. Use WSL2 there, or another engine.",
+          "npm run dev starts the backend again when it is not running."
         ],
         "files": []
       },
@@ -110,9 +111,6 @@
     ],
     "install": {
       "runs": ["npm run setup"],
-      "notes": [
-        "With the php engine, npm run dev starts the backend again when it is not running. A DDEV, Lando or existing backend is started where it runs."
-      ],
       "done": {
         "file": ".env",
         "contains": ["BASE_URL=", "OAUTH_CLIENT_ID="]
