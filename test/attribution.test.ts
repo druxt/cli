@@ -30,11 +30,14 @@ const REJECTED = [
   `${ASSISTED}Claude`,
   `${ASSISTED}GitHub Copilot`,
   `${GENERATED}Copilot`,
+  `${GENERATED}Cursor`,
 ]
 const ACCEPTED = [
   `${CO}Sam Champion <sam@example.org>`,
   `${ASSISTED}Ana Ramp <ana@example.org>`,
   'Reviewed-by: Ana <ana@example.org>',
+  // A tool's name inside another word credits no tool.
+  'Generated ' + 'by the precursor script',
 ]
 
 const rule = config.plugins[0]!.rules['no-ai-attribution']
@@ -90,6 +93,12 @@ const repoWithCommit = (message: string) => {
 const check = (repo: string, path?: string) =>
   spawnSync('bash', [SCRIPT], { cwd: repo, env: env(path), encoding: 'utf8' })
 
+/** The path of the real git, quoted for a shell script, so a directory with a space in its name stays whole. */
+const realGit = () => {
+  const path = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
+  return `'${path.replace(/'/g, `'\\''`)}'`
+}
+
 // A command of the given name that fails as one that could not run does.
 const broken = (name: string, script: string) => {
   const bin = temp()
@@ -126,15 +135,40 @@ describe('check-attribution.sh, when a scan cannot run', () => {
   })
 
   test('a git grep that fails is not a clean tree', () => {
-    const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
     const result = check(
       repoWithCommit('Plain.'),
       broken(
         'git',
-        `[ "$1" = grep ] && { echo "fatal: broken" >&2; exit 128; }\nexec ${git} "$@"`
+        `[ "$1" = grep ] && { echo "fatal: broken" >&2; exit 128; }\nexec ${realGit()} "$@"`
       )
     )
     expect(result.stdout).not.toContain('[PASS]')
+    expect(result.stderr).toContain('fatal: broken')
     expect(result.status).toBe(2)
+  })
+
+  // With pipefail a pipeline's status is its last failing command's, so grep's "no match" would hide
+  // a git log that could not read the message.
+  test('a git log that fails is not a clean commit message', () => {
+    const result = check(
+      repoWithCommit('Plain.'),
+      broken('git', `[ "$1" = log ] && exit 128\nexec ${realGit()} "$@"`)
+    )
+    expect(result.stdout).not.toContain('[PASS]')
+    expect(result.status).toBe(2)
+  })
+})
+
+describe('check-attribution.sh, run before a commit', () => {
+  test('reads what is staged, not only the working tree', () => {
+    const repo = repoWithCommit('Plain.')
+    writeFileSync(join(repo, 'NOTES.md'), `Notes.\n\n${GENERATED}Copilot\n`)
+    execFileSync('git', ['-C', repo, 'add', 'NOTES.md'], { stdio: 'pipe' })
+    // The working copy is cleaned after staging: the commit would still record the staged line.
+    writeFileSync(join(repo, 'NOTES.md'), 'Notes.\n')
+    const result = check(repo)
+    expect(result.stdout).toContain('[FAIL]')
+    expect(result.stdout).toContain('NOTES.md')
+    expect(result.status).toBe(1)
   })
 })
