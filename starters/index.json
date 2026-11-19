@@ -1,6 +1,4 @@
 {
   "revision": 3,
-  "starters": [
-    "quickstart"
-  ]
+  "starters": ["quickstart"]
 }
