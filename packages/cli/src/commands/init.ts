@@ -18,6 +18,11 @@ import {
   type EngineChoice,
 } from '../engines/choose.js'
 import { removeEngineFiles } from '../engines/files.js'
+import {
+  renamed,
+  renameProject,
+  siteProjectName,
+} from '../engines/project-name.js'
 import { DrxError } from '../errors.js'
 import {
   assertLayoutAvailable,
@@ -450,7 +455,24 @@ async function plan(
 
   entry ??= await askStarter(registry, names, context)
   const layout = await chooseLayout(entry, options, context, canAsk)
-  const engine = await chooseEngine(entry, options, context, canAsk)
+  const chosen = await chooseEngine(entry, options, context, canAsk)
+  // The starter's project name gives way to the site's, in the URL too.
+  const projectName = chosen?.project ? siteProjectName(target) : undefined
+  const engine =
+    chosen?.project && projectName
+      ? {
+          ...chosen,
+          projectName,
+          ...(chosen.writeUrl
+            ? {
+                writeUrl: renamed(chosen.writeUrl, chosen.project, projectName),
+              }
+            : {}),
+          ...(chosen.baseUrl
+            ? { baseUrl: renamed(chosen.baseUrl, chosen.project, projectName) }
+            : {}),
+        }
+      : chosen
   const install =
     options.install ??
     (canAsk
@@ -643,6 +665,18 @@ async function runInit(
       removed = paths
       output.did(
         `Removed the files of the engines not chosen: ${removed.join(', ')}.`
+      )
+    }
+  }
+  if (engine?.project && engine.projectName) {
+    const files = await renameProject(
+      target,
+      engine.project,
+      engine.projectName
+    )
+    if (files.length > 0) {
+      output.did(
+        `Named the ${engine.name} project ${engine.projectName}, in ${files.join(', ')}.`
       )
     }
   }

@@ -158,6 +158,56 @@ describe('drx init --engine', () => {
     expect(result.stdout).not.toContain('Local PHP with SQLite')
   })
 
+  // A starter ships with one project name. Two sites made from it would otherwise be one project to the
+  // engine, sharing a database and an address.
+  test('names the project of the engine after the site, in its files and in the URL', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      const engines = druxt.engines as Record<string, unknown>[]
+      engines[1]!.project = {
+        name: 'fixture',
+        files: ['drupal/.ddev/config.yaml'],
+      }
+    })
+    const result = await run(
+      [
+        'init',
+        'My Site_2',
+        '--yes',
+        '--engine',
+        'ddev',
+        '--json',
+        '--registry',
+        registry.url,
+      ],
+      { cwd, nodeVersion: '16.18.1', findCommand: everything }
+    )
+    expect(result.code).toBe(0)
+    const made = join(cwd, 'My Site_2')
+    expect(readFileSync(join(made, 'drupal/.ddev/config.yaml'), 'utf8')).toBe(
+      'name: my-site-2\n'
+    )
+    expect(readFileSync(join(made, '.env'), 'utf8')).toContain(
+      'BASE_URL=http://my-site-2.ddev.site'
+    )
+  })
+
+  test('refuses a project name that is not a plain lower-case name', async () => {
+    await serve((druxt) => {
+      withEngines(druxt)
+      const engines = druxt.engines as Record<string, unknown>[]
+      engines[1]!.project = {
+        name: 'Not Plain',
+        files: ['drupal/.ddev/config.yaml'],
+      }
+    })
+    const result = await init(['--yes', '--engine', 'ddev', '--json'])
+    expect(result.code).toBe(1)
+    expect(JSON.parse(result.stdout).error.message).toContain(
+      'druxt.engines[1].project.name'
+    )
+  })
+
   test('prints what the engine needs, its steps and its notes', async () => {
     const result = await init(['--yes', '--engine', 'ddev'])
     expect(result.stdout).toBe(

@@ -9,6 +9,7 @@ import {
 } from '../registry/entry.js'
 import { isHttpUrl } from '../validate.js'
 import { trimEndSlashes } from '../slashes.js'
+import type { EngineProject } from './project-name.js'
 
 /** What the flags say about the engine. Each is undefined when not given. */
 export interface EngineOptions {
@@ -31,6 +32,10 @@ export interface EngineChoice {
   baseUrl?: string
   /** The URL to write where the starter reads its backend URL from. */
   writeUrl?: string
+  /** The project name the starter ships with, to be replaced by the site's. */
+  project?: EngineProject
+  /** The site's own project name, once the directory is known. */
+  projectName?: string
   steps: EngineStep[]
   notes: string[]
   /** The paths the chosen engine needs. */
@@ -222,6 +227,7 @@ export async function chooseEngine(
     commands: engine.commands,
     ...(database ? { database } : {}),
     ...(engine.baseUrl ? { writeUrl: engine.baseUrl } : {}),
+    ...(engine.project ? { project: engine.project } : {}),
     steps: engine.steps,
     notes: engine.notes ?? [],
     keep: engine.files ?? [],
