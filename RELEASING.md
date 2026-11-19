@@ -30,6 +30,8 @@ A snapshot version reads `0.1.0-dev.20261030024907`: the version the pending cha
 
 A release from an older major's branch publishes under its own tag: `1.9.1`, cut on `1.x` after `2.0.0`, goes to `latest-1`. GitHub does not mark its Release as the latest one. A prerelease publishes under `next`. The tag is chosen when the version is packed, and `latest` is checked against npm again after the approval, in case another release line published a higher version while the run waited.
 
+A few seconds pass between that check and the publish. If two release lines publish inside them, `latest` can end on the older major. Nothing is lost. Run `npm dist-tag add @druxt/cli@2.0.0 latest` for each package to point the tag back at the newer version. Release branches are not put in one queue to close this, because a release that waits in a shared queue can be cancelled by the next one.
+
 A version counts as released once npm has it and its GitHub Release exists. If a run fails between the two, or after one package and before the other, rerun it: it skips what is published and creates what is missing.
 
 ## Build and publish jobs
